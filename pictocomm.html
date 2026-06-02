@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PictoComm</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#050a0e;
+  --bg2:#0d1117;
+  --glass:rgba(255,255,255,0.04);
+  --glass-border:rgba(255,255,255,0.08);
+  --glass-hover:rgba(255,255,255,0.07);
+  --text:#f0f4f8;
+  --text-muted:rgba(240,244,248,0.5);
+  --accent:#4fc3f7;
+  --accent2:#81d4fa;
+  --mongo:#00ed64;
+  --cassandra:#e47911;
+  --redis:#ff4438;
+  --neo4j:#018bff;
+  --radius:16px;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;overflow-x:hidden}
+
+/* CANVAS BG */
+#canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+
+/* SPLASH */
+#splash{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;transition:opacity 0.8s ease}
+#splash.hidden{opacity:0;pointer-events:none}
+.splash-logo{font-family:'Syne',sans-serif;font-size:clamp(2.5rem,8vw,5rem);font-weight:800;letter-spacing:-2px;background:linear-gradient(135deg,#4fc3f7,#81d4fa,#b3e5fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.splash-sub{font-size:1rem;color:var(--text-muted);letter-spacing:3px;text-transform:uppercase;font-weight:300}
+.splash-bar{width:200px;height:2px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;margin-top:8px}
+.splash-fill{height:100%;background:linear-gradient(90deg,#4fc3f7,#81d4fa);border-radius:2px;width:0%;transition:width 0.05s linear}
+.splash-msg{font-size:0.8rem;color:var(--text-muted);letter-spacing:1px;min-height:20px;transition:opacity 0.3s}
+
+/* APP */
+#app{position:relative;z-index:1;min-height:100vh;opacity:0;transition:opacity 0.8s ease}
+#app.visible{opacity:1}
+
+/* NAV */
+nav{display:flex;align-items:center;justify-content:space-between;padding:20px 40px;border-bottom:1px solid var(--glass-border);backdrop-filter:blur(20px);position:sticky;top:0;z-index:100;background:rgba(5,10,14,0.8)}
+.nav-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;letter-spacing:-1px;background:linear-gradient(135deg,#4fc3f7,#81d4fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.nav-tabs{display:flex;gap:4px;background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;padding:4px}
+.nav-tab{padding:8px 20px;border-radius:9px;font-size:0.85rem;font-weight:500;cursor:pointer;transition:all 0.2s;color:var(--text-muted);border:none;background:transparent;letter-spacing:0.3px}
+.nav-tab:hover{color:var(--text);background:var(--glass-hover)}
+.nav-tab.active{background:rgba(79,195,247,0.15);color:var(--accent);border:1px solid rgba(79,195,247,0.2)}
+.nav-status{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:#00ed64;box-shadow:0 0 8px #00ed64;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+/* SECTIONS */
+.section{display:none;padding:40px;max-width:1200px;margin:0 auto;animation:fadeIn 0.4s ease}
+.section.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+/* HERO */
+.hero{text-align:center;padding:60px 20px 40px;position:relative}
+.hero h1{font-family:'Syne',sans-serif;font-size:clamp(2rem,5vw,3.5rem);font-weight:800;letter-spacing:-2px;line-height:1.1;margin-bottom:16px}
+.hero h1 span{background:linear-gradient(135deg,#4fc3f7,#81d4fa,#e0f7fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{color:var(--text-muted);font-size:1.1rem;max-width:600px;margin:0 auto 40px;line-height:1.7}
+
+/* DB CARDS GRID */
+.db-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-bottom:40px}
+.db-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--radius);padding:28px;cursor:pointer;transition:all 0.3s;position:relative;overflow:hidden}
+.db-card::before{content:'';position:absolute;inset:0;opacity:0;transition:opacity 0.3s;border-radius:var(--radius)}
+.db-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.db-card:hover::before{opacity:1}
+.db-card.mongo::before{background:radial-gradient(circle at top left,rgba(0,237,100,0.08),transparent 60%)}
+.db-card.cassandra::before{background:radial-gradient(circle at top left,rgba(228,121,17,0.08),transparent 60%)}
+.db-card.redis::before{background:radial-gradient(circle at top left,rgba(255,68,56,0.08),transparent 60%)}
+.db-card.neo4j::before{background:radial-gradient(circle at top left,rgba(1,139,255,0.08),transparent 60%)}
+.db-card.mongo{border-top:2px solid var(--mongo)}
+.db-card.cassandra{border-top:2px solid var(--cassandra)}
+.db-card.redis{border-top:2px solid var(--redis)}
+.db-card.neo4j{border-top:2px solid var(--neo4j)}
+.db-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin-bottom:16px;font-weight:700;font-family:'Syne',sans-serif}
+.db-icon.mongo{background:rgba(0,237,100,0.1);color:var(--mongo)}
+.db-icon.cassandra{background:rgba(228,121,17,0.1);color:var(--cassandra)}
+.db-icon.redis{background:rgba(255,68,56,0.1);color:var(--redis)}
+.db-icon.neo4j{background:rgba(1,139,255,0.1);color:var(--neo4j)}
+.db-card h3{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;margin-bottom:6px}
+.db-card p{font-size:0.85rem;color:var(--text-muted);line-height:1.6}
+.db-badge{display:inline-block;margin-top:14px;padding:4px 12px;border-radius:6px;font-size:0.75rem;font-weight:500}
+.db-badge.live{background:rgba(0,237,100,0.1);color:var(--mongo);border:1px solid rgba(0,237,100,0.2)}
+.db-badge.soon{background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid var(--glass-border)}
+
+/* SECTION HEADER */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;flex-wrap:gap}
+.section-title{font-family:'Syne',sans-serif;font-size:1.8rem;font-weight:800;letter-spacing:-1px}
+.section-title span{font-size:0.85rem;font-weight:400;font-family:'DM Sans',sans-serif;color:var(--text-muted);letter-spacing:0;margin-left:12px}
+
+/* GLASS CARD */
+.glass-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--radius);padding:28px}
+
+/* STATS ROW */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:32px}
+.stat-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;padding:20px 24px;position:relative;overflow:hidden}
+.stat-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px}
+.stat-card.s1::after{background:linear-gradient(90deg,#4fc3f7,transparent)}
+.stat-card.s2::after{background:linear-gradient(90deg,#00ed64,transparent)}
+.stat-card.s3::after{background:linear-gradient(90deg,#e47911,transparent)}
+.stat-label{font-size:0.75rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+.stat-value{font-family:'Syne',sans-serif;font-size:1.8rem;font-weight:700;line-height:1}
+.stat-sub{font-size:0.75rem;color:var(--text-muted);margin-top:4px}
+
+/* TABLE */
+.data-table{width:100%;border-collapse:collapse;font-size:0.88rem}
+.data-table th{text-align:left;padding:12px 16px;color:var(--text-muted);font-weight:500;font-size:0.78rem;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--glass-border)}
+.data-table td{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.03);vertical-align:middle}
+.data-table tr:hover td{background:var(--glass-hover)}
+.data-table tr:last-child td{border-bottom:none}
+
+/* USER PILL */
+.user-pill{display:flex;align-items:center;gap:10px}
+.avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:600;flex-shrink:0}
+.color-dot{width:14px;height:14px;border-radius:50%;display:inline-block;border:2px solid rgba(255,255,255,0.2)}
+.size-badge{padding:3px 10px;border-radius:5px;font-size:0.75rem;background:rgba(255,255,255,0.07);color:var(--text-muted)}
+
+/* FORMS */
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.form-group{display:flex;flex-direction:column;gap:8px}
+.form-group label{font-size:0.8rem;color:var(--text-muted);letter-spacing:0.5px;text-transform:uppercase}
+.form-input{background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:0.9rem;font-family:'DM Sans',sans-serif;transition:all 0.2s;outline:none}
+.form-input:focus{border-color:rgba(79,195,247,0.4);background:rgba(79,195,247,0.05)}
+.form-select{background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);border-radius:10px;padding:12px 16px;color:var(--text);font-size:0.9rem;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;-webkit-appearance:none}
+.form-select option{background:#0d1117;color:var(--text)}
+.btn{padding:12px 24px;border-radius:10px;font-size:0.9rem;font-weight:500;cursor:pointer;transition:all 0.2s;border:none;font-family:'DM Sans',sans-serif;letter-spacing:0.3px}
+.btn-primary{background:linear-gradient(135deg,#4fc3f7,#29b6f6);color:#050a0e}
+.btn-primary:hover{opacity:0.9;transform:translateY(-1px)}
+.btn-ghost{background:var(--glass);border:1px solid var(--glass-border);color:var(--text)}
+.btn-ghost:hover{background:var(--glass-hover);border-color:rgba(255,255,255,0.15)}
+.btn-danger{background:rgba(255,68,56,0.1);border:1px solid rgba(255,68,56,0.2);color:#ff4438}
+.btn-danger:hover{background:rgba(255,68,56,0.2)}
+
+/* TOAST */
+#toast{position:fixed;bottom:32px;right:32px;z-index:9000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast-item{padding:14px 20px;border-radius:12px;font-size:0.88rem;backdrop-filter:blur(20px);border:1px solid;animation:toastIn 0.3s ease;max-width:340px}
+.toast-item.success{background:rgba(0,237,100,0.1);border-color:rgba(0,237,100,0.3);color:#00ed64}
+.toast-item.error{background:rgba(255,68,56,0.1);border-color:rgba(255,68,56,0.3);color:#ff4438}
+.toast-item.info{background:rgba(79,195,247,0.1);border-color:rgba(79,195,247,0.3);color:#4fc3f7}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+
+/* LOADING */
+.loading-spinner{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.1);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-row{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text-muted);font-size:0.9rem}
+
+/* PICTOGRAM SEQUENCE */
+.picto-seq{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.picto-chip{background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:8px;padding:4px 12px;font-size:0.8rem;color:var(--accent2)}
+.arrow-sep{color:var(--text-muted);font-size:0.8rem}
+
+/* CASSANDRA CHART */
+.chart-bars{display:flex;align-items:flex-end;gap:6px;height:120px;margin-top:16px}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar{width:100%;background:linear-gradient(to top,rgba(228,121,17,0.6),rgba(228,121,17,0.3));border-radius:4px 4px 0 0;min-height:4px;transition:height 0.8s cubic-bezier(0.4,0,0.2,1)}
+.bar-label{font-size:0.68rem;color:var(--text-muted);white-space:nowrap}
+.bar-val{font-size:0.7rem;color:var(--cassandra);font-weight:500}
+
+/* TOP PICTOS */
+.top-picto-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.top-picto-row:last-child{border-bottom:none}
+.top-rank{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;color:var(--text-muted);width:28px}
+.top-bar{flex:1;height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden}
+.top-bar-fill{height:100%;background:linear-gradient(90deg,var(--cassandra),rgba(228,121,17,0.4));border-radius:3px;transition:width 1s ease}
+.top-count{font-size:0.8rem;color:var(--text-muted);min-width:30px;text-align:right}
+
+/* EVALUACION BADGE */
+.eval-badge{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;font-weight:500;font-size:0.9rem}
+.eval-badge.excelente{background:rgba(0,237,100,0.1);color:#00ed64;border:1px solid rgba(0,237,100,0.2)}
+.eval-badge.bueno{background:rgba(79,195,247,0.1);color:#4fc3f7;border:1px solid rgba(79,195,247,0.2)}
+.eval-badge.regular{background:rgba(228,121,17,0.1);color:#e47911;border:1px solid rgba(228,121,17,0.2)}
+.eval-badge.inicio{background:rgba(255,68,56,0.1);color:#ff4438;border:1px solid rgba(255,68,56,0.2)}
+
+/* NEO4J VISUAL */
+.neo-node{cursor:pointer;transition:all 0.2s}
+.neo-node circle{transition:r 0.2s}
+.neo-node:hover circle{r:22}
+
+/* SEARCH BAR */
+.search-bar{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.search-input{flex:1;min-width:200px;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);border-radius:10px;padding:11px 16px;color:var(--text);font-size:0.9rem;font-family:'DM Sans',sans-serif;outline:none;transition:all 0.2s}
+.search-input:focus{border-color:rgba(79,195,247,0.3)}
+.search-input::placeholder{color:var(--text-muted)}
+
+/* TABS INNER */
+.inner-tabs{display:flex;gap:4px;margin-bottom:24px;background:var(--glass);border:1px solid var(--glass-border);border-radius:10px;padding:4px;width:fit-content}
+.inner-tab{padding:7px 18px;border-radius:7px;font-size:0.85rem;cursor:pointer;color:var(--text-muted);border:none;background:transparent;transition:all 0.2s;font-family:'DM Sans',sans-serif}
+.inner-tab.active{background:var(--glass-hover);color:var(--text);border:1px solid var(--glass-border)}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;z-index:500;background:rgba(5,10,14,0.8);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.2s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:#0d1117;border:1px solid var(--glass-border);border-radius:20px;padding:32px;width:90%;max-width:500px;transform:scale(0.95);transition:transform 0.2s}
+.modal-overlay.open .modal{transform:scale(1)}
+.modal h2{font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;margin-bottom:24px}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  nav{padding:14px 20px}
+  .nav-tabs{display:none}
+  .section{padding:20px}
+  .form-row{grid-template-columns:1fr}
+  .stats-row{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-logo">PictoComm</div>
+  <div class="splash-sub">Sistema de comunicación por pictogramas</div>
+  <div class="splash-bar"><div class="splash-fill" id="splashFill"></div></div>
+  <div class="splash-msg" id="splashMsg">Iniciando sistema...</div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <nav>
+    <div class="nav-logo">PictoComm</div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showSection('home')">Inicio</button>
+      <button class="nav-tab" onclick="showSection('mongo')">MongoDB</button>
+      <button class="nav-tab" onclick="showSection('cassandra')">Cassandra</button>
+      <button class="nav-tab" onclick="showSection('redis')">Redis</button>
+      <button class="nav-tab" onclick="showSection('neo4j')">Neo4j</button>
+    </div>
+    <div class="nav-status"><span class="dot"></span><span id="statusText">Conectado</span></div>
+  </nav>
+
+  <!-- HOME -->
+  <div class="section active" id="sec-home">
+    <div class="hero">
+      <h1>Sistema de<br/><span>Comunicación Aumentativa</span></h1>
+      <p>Plataforma multimotor para terapeutas y alumnos. Cada base de datos cumple un rol específico en el ecosistema PictoComm.</p>
+    </div>
+    <div class="db-grid">
+      <div class="db-card mongo" onclick="showSection('mongo')">
+        <div class="db-icon mongo">M</div>
+        <h3>MongoDB Atlas</h3>
+        <p>Perfiles de usuarios, configuración personalizada, preferencias de cada alumno.</p>
+        <span class="db-badge live">● En vivo</span>
+      </div>
+      <div class="db-card cassandra" onclick="showSection('cassandra')">
+        <div class="db-icon cassandra">C</div>
+        <h3>Cassandra Astra</h3>
+        <p>Historial de interacciones, estadísticas del terapeuta, progreso de cada alumno.</p>
+        <span class="db-badge live">● En vivo</span>
+      </div>
+      <div class="db-card redis" onclick="showSection('redis')">
+        <div class="db-icon redis">R</div>
+        <h3>Redis</h3>
+        <p>Sesiones activas, tiempo de actividad, estado de conexión en tiempo real.</p>
+        <span class="db-badge soon">Próximamente</span>
+      </div>
+      <div class="db-card neo4j" onclick="showSection('neo4j')">
+        <div class="db-icon neo4j">N</div>
+        <h3>Neo4j</h3>
+        <p>Grafo de relaciones entre pictogramas, sugerencias automáticas de secuencias.</p>
+        <span class="db-badge soon">Visual</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MONGODB -->
+  <div class="section" id="sec-mongo">
+    <div class="section-header">
+      <div>
+        <div class="section-title">MongoDB Atlas <span>Perfiles de usuarios</span></div>
+      </div>
+      <button class="btn btn-primary" onclick="openModal('modalRegistro')">+ Nuevo usuario</button>
+    </div>
+
+    <div class="stats-row" id="mongoStats">
+      <div class="stat-card s1"><div class="stat-label">Total usuarios</div><div class="stat-value" id="statTotal">—</div><div class="stat-sub">en Atlas</div></div>
+      <div class="stat-card s2"><div class="stat-label">Fondo más usado</div><div class="stat-value" id="statColor" style="font-size:1rem;margin-top:4px">—</div></div>
+      <div class="stat-card s3"><div class="stat-label">Tamaño más común</div><div class="stat-value" id="statSize" style="font-size:1.3rem">—</div></div>
+    </div>
+
+    <div class="glass-card">
+      <div class="search-bar">
+        <input class="search-input" id="searchMongo" placeholder="Buscar usuario..." oninput="filterUsuarios()"/>
+        <button class="btn btn-ghost" onclick="loadUsuarios()">↻ Actualizar</button>
+      </div>
+      <div id="mongoTable">
+        <div class="loading-row"><span class="loading-spinner"></span>Cargando usuarios...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CASSANDRA -->
+  <div class="section" id="sec-cassandra">
+    <div class="section-header">
+      <div class="section-title">Cassandra Astra <span>Panel del terapeuta</span></div>
+    </div>
+
+    <div class="inner-tabs">
+      <button class="inner-tab active" onclick="cassTab('estadisticas')">Estadísticas</button>
+      <button class="inner-tab" onclick="cassTab('historial')">Historial</button>
+      <button class="inner-tab" onclick="cassTab('nueva')">Nueva interacción</button>
+    </div>
+
+    <!-- ESTADÍSTICAS -->
+    <div id="cass-estadisticas">
+      <div class="search-bar">
+        <input class="search-input" id="cassUserId" placeholder="ID del usuario (ej: alumno_001)" style="max-width:360px"/>
+        <button class="btn btn-primary" onclick="loadEstadisticas()">Ver estadísticas</button>
+      </div>
+      <div id="cassStatsContent">
+        <div style="text-align:center;padding:60px;color:var(--text-muted)">Ingresá un ID de usuario para ver sus estadísticas</div>
+      </div>
+    </div>
+
+    <!-- HISTORIAL -->
+    <div id="cass-historial" style="display:none">
+      <div class="search-bar">
+        <input class="search-input" id="cassHistId" placeholder="ID del usuario" style="max-width:360px"/>
+        <button class="btn btn-primary" onclick="loadHistorial(1)">Ver historial</button>
+      </div>
+      <div id="cassHistContent">
+        <div style="text-align:center;padding:60px;color:var(--text-muted)">Ingresá un ID para ver el historial</div>
+      </div>
+      <div id="cassHistPag" style="display:flex;gap:12px;margin-top:20px;justify-content:center"></div>
+    </div>
+
+    <!-- NUEVA INTERACCION -->
+    <div id="cass-nueva" style="display:none">
+      <div class="glass-card" style="max-width:500px">
+        <h3 style="font-family:Syne,sans-serif;font-weight:700;margin-bottom:20px">Registrar interacción</h3>
+        <div class="form-group" style="margin-bottom:16px">
+          <label>ID del usuario</label>
+          <input class="form-input" id="newIntUserId" placeholder="ej: alumno_001"/>
+        </div>
+        <div class="form-group" style="margin-bottom:24px">
+          <label>Secuencia de pictogramas (IDs separados por coma)</label>
+          <input class="form-input" id="newIntSeq" placeholder="ej: 1, 5, 12, 3"/>
+          <small style="color:var(--text-muted);font-size:0.78rem;margin-top:4px">Los IDs corresponden a nodos del grafo Neo4j</small>
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="guardarInteraccion()">Guardar interacción</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REDIS -->
+  <div class="section" id="sec-redis">
+    <div class="section-title" style="margin-bottom:32px">Redis <span style="font-size:0.85rem;font-weight:400;color:var(--text-muted);margin-left:12px">Gestión de sesiones</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+      <div class="glass-card" style="border-top:2px solid var(--redis);opacity:0.7">
+        <div style="font-size:2rem;margin-bottom:12px">⚡</div>
+        <h3 style="font-family:Syne,sans-serif;font-weight:700;margin-bottom:8px">Sesiones activas</h3>
+        <p style="color:var(--text-muted);font-size:0.88rem;line-height:1.6">Redis almacena en memoria quién está conectado y cuánto tiempo lleva activo. Las sesiones expiran automáticamente a los 30 minutos de inactividad.</p>
+        <div style="margin-top:20px;padding:16px;background:rgba(255,68,56,0.05);border:1px solid rgba(255,68,56,0.1);border-radius:10px;color:var(--text-muted);font-size:0.85rem">API local pendiente de migración a nube</div>
+      </div>
+      <div class="glass-card" style="border-top:2px solid var(--redis);opacity:0.7">
+        <div style="font-size:2rem;margin-bottom:12px">🔁</div>
+        <h3 style="font-family:Syne,sans-serif;font-weight:700;margin-bottom:8px">Proxy Neo4j</h3>
+        <p style="color:var(--text-muted);font-size:0.88rem;line-height:1.6">Redis actúa como intermediario hacia Neo4j, cacheando las sugerencias de pictogramas más frecuentes para reducir latencia.</p>
+        <div style="margin-top:20px;padding:16px;background:rgba(255,68,56,0.05);border:1px solid rgba(255,68,56,0.1);border-radius:10px;color:var(--text-muted);font-size:0.85rem">En desarrollo — próxima integración</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEO4J -->
+  <div class="section" id="sec-neo4j">
+    <div class="section-title" style="margin-bottom:8px">Neo4j <span style="font-size:0.85rem;font-weight:400;color:var(--text-muted);margin-left:12px">Grafo de pictogramas</span></div>
+    <p style="color:var(--text-muted);font-size:0.88rem;margin-bottom:24px">Cada nodo es un pictograma. Las flechas representan secuencias válidas para construir frases con sentido. Hacé click en un nodo para ver sus conexiones.</p>
+    <div class="glass-card" style="padding:0;overflow:hidden">
+      <svg id="neoGraph" width="100%" viewBox="0 0 800 500" style="display:block;background:transparent"></svg>
+    </div>
+    <div id="neoInfo" style="margin-top:16px;min-height:60px"></div>
+  </div>
+</div>
+
+<!-- MODAL REGISTRO -->
+<div class="modal-overlay" id="modalRegistro">
+  <div class="modal">
+    <h2>Nuevo usuario</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Username</label>
+        <input class="form-input" id="regUser" placeholder="nombre_usuario"/>
+      </div>
+      <div class="form-group">
+        <label>Contraseña</label>
+        <input class="form-input" id="regPass" type="password" placeholder="••••••"/>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Color de fondo</label>
+        <select class="form-select" id="regColor">
+          <option value="#FFFFFF">Blanco</option>
+          <option value="#FFF9C4">Amarillo suave</option>
+          <option value="#E3F2FD">Azul suave</option>
+          <option value="#F3E5F5">Violeta suave</option>
+          <option value="#E8F5E9">Verde suave</option>
+          <option value="#FFE0B2">Naranja suave</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tamaño de íconos</label>
+        <select class="form-select" id="regSize">
+          <option value="pequeño">Pequeño</option>
+          <option value="mediano" selected>Mediano</option>
+          <option value="grande">Grande</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modalRegistro')">Cancelar</button>
+      <button class="btn btn-primary" style="flex:1" onclick="registrarUsuario()">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR -->
+<div class="modal-overlay" id="modalEditar">
+  <div class="modal">
+    <h2>Editar configuración</h2>
+    <input type="hidden" id="editId"/>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Color de fondo</label>
+        <select class="form-select" id="editColor">
+          <option value="#FFFFFF">Blanco</option>
+          <option value="#FFF9C4">Amarillo suave</option>
+          <option value="#E3F2FD">Azul suave</option>
+          <option value="#F3E5F5">Violeta suave</option>
+          <option value="#E8F5E9">Verde suave</option>
+          <option value="#FFE0B2">Naranja suave</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tamaño de íconos</label>
+        <select class="form-select" id="editSize">
+          <option value="pequeño">Pequeño</option>
+          <option value="mediano">Mediano</option>
+          <option value="grande">Grande</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modalEditar')">Cancelar</button>
+      <button class="btn btn-primary" style="flex:1" onclick="guardarConfig()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════
+// CONFIG — cambiá estas IPs si cambia la red
+// ═══════════════════════════════════════════
+const MONGO_API = 'http://localhost:3000';
+const CASS_API  = 'http://localhost:8000';
+
+// ═══════════════════════════════════════════
+// CANVAS PARTICLE BG
+// ═══════════════════════════════════════════
+(function(){
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles=[], mouse={x:0,y:0};
+  function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight}
+  resize();window.addEventListener('resize',resize);
+  document.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+  class P{
+    constructor(){this.reset()}
+    reset(){
+      this.x=Math.random()*W;this.y=Math.random()*H;
+      this.vx=(Math.random()-0.5)*0.3;this.vy=(Math.random()-0.5)*0.3;
+      this.r=Math.random()*1.5+0.5;this.a=Math.random()*0.4+0.1;
+      this.color=Math.random()>0.7?'79,195,247':'255,255,255';
+    }
+    update(){
+      const dx=mouse.x-this.x,dy=mouse.y-this.y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<150){this.vx-=dx/dist*0.02;this.vy-=dy/dist*0.02}
+      this.x+=this.vx;this.y+=this.vy;
+      this.vx*=0.99;this.vy*=0.99;
+      if(this.x<0||this.x>W||this.y<0||this.y>H)this.reset();
+    }
+    draw(){
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${this.color},${this.a})`;ctx.fill();
+    }
+  }
+  for(let i=0;i<120;i++)particles.push(new P());
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // connections
+    particles.forEach((a,i)=>{
+      particles.slice(i+1).forEach(b=>{
+        const dx=a.x-b.x,dy=a.y-b.y,d=Math.sqrt(dx*dx+dy*dy);
+        if(d<100){
+          ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+          ctx.strokeStyle=`rgba(79,195,247,${0.06*(1-d/100)})`;ctx.lineWidth=0.5;ctx.stroke();
+        }
+      });
+      a.update();a.draw();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ═══════════════════════════════════════════
+// SPLASH
+// ═══════════════════════════════════════════
+const msgs=['Iniciando sistema...','Conectando a MongoDB Atlas...','Conectando a Cassandra Astra...','Cargando pictogramas...','Listo!'];
+let pct=0;
+const fill=document.getElementById('splashFill');
+const msgEl=document.getElementById('splashMsg');
+let mi=0;
+const iv=setInterval(()=>{
+  pct+=1;fill.style.width=pct+'%';
+  if(pct%20===0&&mi<msgs.length){msgEl.style.opacity=0;setTimeout(()=>{msgEl.textContent=msgs[mi++];msgEl.style.opacity=1},300)}
+  if(pct>=100){
+    clearInterval(iv);
+    setTimeout(()=>{
+      document.getElementById('splash').classList.add('hidden');
+      document.getElementById('app').classList.add('visible');
+      loadUsuarios();
+    },600);
+  }
+},30);
+
+// ═══════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════
+function showSection(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('sec-'+id).classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(t=>{if(t.textContent.toLowerCase().includes(id)||id==='home'&&t.textContent==='Inicio')t.classList.add('active')});
+  if(id==='mongo')loadUsuarios();
+  if(id==='neo4j')drawNeo();
+}
+
+// ═══════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════
+function toast(msg,type='info'){
+  const t=document.getElementById('toast');
+  const d=document.createElement('div');
+  d.className=`toast-item ${type}`;d.textContent=msg;t.appendChild(d);
+  setTimeout(()=>d.remove(),3500);
+}
+
+// ═══════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════
+function openModal(id){document.getElementById(id).classList.add('open')}
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
+
+// ═══════════════════════════════════════════
+// MONGODB — USUARIOS
+// ═══════════════════════════════════════════
+let allUsuarios=[];
+
+async function loadUsuarios(){
+  const container=document.getElementById('mongoTable');
+  container.innerHTML='<div class="loading-row"><span class="loading-spinner"></span>Cargando desde Atlas...</div>';
+  try{
+    const r=await fetch(`${MONGO_API}/api/usuarios`);
+    if(!r.ok)throw new Error('Error '+r.status);
+    allUsuarios=await r.json();
+    updateMongoStats();
+    renderUsuarios(allUsuarios);
+    toast(`${allUsuarios.length} usuarios cargados`,'success');
+  }catch(e){
+    container.innerHTML='<div class="loading-row" style="color:var(--redis)">Error al conectar con MongoDB — verificá que la API esté corriendo en puerto 3000</div>';
+    toast('No se pudo conectar a MongoDB','error');
+  }
+}
+
+function updateMongoStats(){
+  document.getElementById('statTotal').textContent=allUsuarios.length;
+  const colors=allUsuarios.map(u=>u.colorFondo).filter(Boolean);
+  const sizes=allUsuarios.map(u=>u.tamañoIconos).filter(Boolean);
+  const topColor=mode(colors)||'—';
+  const topSize=mode(sizes)||'—';
+  const colorEl=document.getElementById('statColor');
+  colorEl.innerHTML=`<span style="display:inline-flex;align-items:center;gap:8px"><span class="color-dot" style="background:${topColor};border-color:rgba(255,255,255,0.3)"></span>${topColor}</span>`;
+  document.getElementById('statSize').textContent=topSize;
+}
+
+function mode(arr){const f={};arr.forEach(v=>{f[v]=(f[v]||0)+1});return Object.entries(f).sort((a,b)=>b[1]-a[1])[0]?.[0]}
+
+function filterUsuarios(){
+  const q=document.getElementById('searchMongo').value.toLowerCase();
+  renderUsuarios(allUsuarios.filter(u=>u.username.toLowerCase().includes(q)));
+}
+
+function renderUsuarios(list){
+  if(!list.length){document.getElementById('mongoTable').innerHTML='<div class="loading-row">No se encontraron usuarios</div>';return}
+  let h=`<table class="data-table">
+    <thead><tr><th>Usuario</th><th>Color de fondo</th><th>Íconos</th><th>Pictogramas excluidos</th><th>Personalizados</th><th>Acciones</th></tr></thead><tbody>`;
+  list.forEach(u=>{
+    const initials=u.username.substring(0,2).toUpperCase();
+    const hue=simpleHash(u.username)%360;
+    h+=`<tr>
+      <td><div class="user-pill">
+        <div class="avatar" style="background:hsl(${hue},30%,25%);color:hsl(${hue},60%,70%)">${initials}</div>
+        <span>${u.username}</span>
+      </div></td>
+      <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="color-dot" style="background:${u.colorFondo||'#fff'}"></span>${u.colorFondo||'—'}</span></td>
+      <td><span class="size-badge">${u.tamañoIconos||'—'}</span></td>
+      <td style="color:var(--text-muted);font-size:0.82rem">${(u.listaEliminados||[]).length} íconos</td>
+      <td style="color:var(--text-muted);font-size:0.82rem">${(u.listaAdmitidosPersonalizados||[]).length} íconos</td>
+      <td>
+        <button class="btn btn-ghost" style="padding:6px 14px;font-size:0.8rem;margin-right:6px" onclick='editUser("${u._id}","${u.colorFondo}","${u.tamañoIconos}")'>Editar</button>
+        <button class="btn btn-danger" style="padding:6px 14px;font-size:0.8rem" onclick='deleteUser("${u._id}","${u.username}")'>Borrar</button>
+      </td>
+    </tr>`;
+  });
+  h+='</tbody></table>';
+  document.getElementById('mongoTable').innerHTML=h;
+}
+
+function simpleHash(s){let h=0;for(let c of s)h=((h<<5)-h)+c.charCodeAt(0);return Math.abs(h)}
+
+async function registrarUsuario(){
+  const username=document.getElementById('regUser').value.trim();
+  const password=document.getElementById('regPass').value;
+  const colorFondo=document.getElementById('regColor').value;
+  const tamañoIconos=document.getElementById('regSize').value;
+  if(!username||!password){toast('Completá usuario y contraseña','error');return}
+  try{
+    const r=await fetch(`${MONGO_API}/api/registrar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,colorFondo,tamañoIconos})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.mensaje||'Error');
+    toast(`Usuario ${username} registrado`,'success');
+    closeModal('modalRegistro');
+    document.getElementById('regUser').value='';document.getElementById('regPass').value='';
+    loadUsuarios();
+  }catch(e){toast(e.message,'error')}
+}
+
+function editUser(id,color,size){
+  document.getElementById('editId').value=id;
+  document.getElementById('editColor').value=color;
+  document.getElementById('editSize').value=size;
+  openModal('modalEditar');
+}
+
+async function guardarConfig(){
+  const id=document.getElementById('editId').value;
+  const colorFondo=document.getElementById('editColor').value;
+  const tamañoIconos=document.getElementById('editSize').value;
+  try{
+    const r=await fetch(`${MONGO_API}/api/cambiarConfig/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({colorFondo,tamañoIconos})});
+    if(!r.ok)throw new Error('Error al actualizar');
+    toast('Configuración actualizada','success');
+    closeModal('modalEditar');loadUsuarios();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function deleteUser(id,username){
+  if(!confirm(`¿Eliminar a ${username}?`))return;
+  try{
+    const r=await fetch(`${MONGO_API}/api/usuarios/${id}`,{method:'DELETE'});
+    if(!r.ok)throw new Error('Error al eliminar');
+    toast(`${username} eliminado`,'success');
+    loadUsuarios();
+  }catch(e){toast(e.message,'error')}
+}
+
+// ═══════════════════════════════════════════
+// CASSANDRA TABS
+// ═══════════════════════════════════════════
+function cassTab(tab){
+  ['estadisticas','historial','nueva'].forEach(t=>{
+    document.getElementById('cass-'+t).style.display=t===tab?'block':'none';
+  });
+  document.querySelectorAll('.inner-tab').forEach((t,i)=>{
+    t.classList.toggle('active',['estadisticas','historial','nueva'][i]===tab);
+  });
+}
+
+// ═══════════════════════════════════════════
+// CASSANDRA — ESTADÍSTICAS
+// ═══════════════════════════════════════════
+async function loadEstadisticas(){
+  const uid=document.getElementById('cassUserId').value.trim();
+  if(!uid){toast('Ingresá un ID de usuario','error');return}
+  const el=document.getElementById('cassStatsContent');
+  el.innerHTML='<div class="loading-row"><span class="loading-spinner"></span>Cargando estadísticas...</div>';
+  try{
+    const r=await fetch(`${CASS_API}/estadisticas/${uid}`);
+    if(!r.ok)throw new Error('Usuario no encontrado');
+    const d=await r.json();
+    renderEstadisticas(d,uid);
+  }catch(e){
+    el.innerHTML=`<div class="loading-row" style="color:var(--redis)">${e.message} — verificá que la API de Cassandra esté corriendo</div>`;
+    toast(e.message,'error');
+  }
+}
+
+function renderEstadisticas(d,uid){
+  const evalClass={Excelente:'excelente',Bueno:'bueno',Regular:'regular','En inicio':'inicio'}[d.evaluacion_automatica]||'bueno';
+  const dias=d.actividad_por_dia||{};
+  const maxDia=Math.max(...Object.values(dias),1);
+  const barsHtml=Object.entries(dias).slice(-7).map(([dia,cnt])=>`
+    <div class="bar-wrap">
+      <div class="bar-val">${cnt}</div>
+      <div class="bar" style="height:${Math.max(8,cnt/maxDia*100)}px"></div>
+      <div class="bar-label">${dia.slice(5)}</div>
+    </div>`).join('');
+
+  const top5=d.top_5_pictogramas||[];
+  const maxTop=Math.max(...top5.map(p=>p.cantidad),1);
+  const topHtml=top5.map((p,i)=>`
+    <div class="top-picto-row">
+      <div class="top-rank">#${i+1}</div>
+      <div style="flex:1">
+        <div style="font-size:0.85rem;margin-bottom:4px">Pictograma <strong>${p.pictograma_id}</strong></div>
+        <div class="top-bar"><div class="top-bar-fill" style="width:${p.cantidad/maxTop*100}%"></div></div>
+      </div>
+      <div class="top-count">${p.cantidad}x</div>
+    </div>`).join('');
+
+  document.getElementById('cassStatsContent').innerHTML=`
+    <div class="stats-row" style="margin-bottom:24px">
+      <div class="stat-card s3"><div class="stat-label">Usuario</div><div class="stat-value" style="font-size:1.2rem">${uid}</div></div>
+      <div class="stat-card s1"><div class="stat-label">Total frases</div><div class="stat-value">${d.total_interacciones||0}</div></div>
+      <div class="stat-card s2"><div class="stat-label">Días activo</div><div class="stat-value">${Object.keys(dias).length}</div></div>
+      <div class="stat-card s3" style="display:flex;flex-direction:column;justify-content:center">
+        <div class="stat-label" style="margin-bottom:8px">Evaluación</div>
+        <span class="eval-badge ${evalClass}">${d.evaluacion_automatica||'—'}</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;flex-wrap:wrap">
+      <div class="glass-card">
+        <div style="font-size:0.8rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">Actividad por día</div>
+        <div class="chart-bars">${barsHtml||'<div style="color:var(--text-muted);font-size:0.85rem">Sin datos</div>'}</div>
+      </div>
+      <div class="glass-card">
+        <div style="font-size:0.8rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px">Top 5 pictogramas</div>
+        ${topHtml||'<div style="color:var(--text-muted);font-size:0.85rem">Sin datos</div>'}
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════
+// CASSANDRA — HISTORIAL
+// ═══════════════════════════════════════════
+let histPagina=1;
+
+async function loadHistorial(pag){
+  const uid=document.getElementById('cassHistId').value.trim();
+  if(!uid){toast('Ingresá un ID de usuario','error');return}
+  histPagina=pag;
+  const el=document.getElementById('cassHistContent');
+  el.innerHTML='<div class="loading-row"><span class="loading-spinner"></span>Cargando historial...</div>';
+  try{
+    const r=await fetch(`${CASS_API}/interacciones/${uid}?pagina=${pag}`);
+    if(!r.ok)throw new Error('Error al cargar');
+    const d=await r.json();
+    renderHistorial(d,uid,pag);
+  }catch(e){
+    el.innerHTML=`<div class="loading-row" style="color:var(--redis)">${e.message}</div>`;
+  }
+}
+
+function renderHistorial(d,uid,pag){
+  const items=d.interacciones||[];
+  if(!items.length){document.getElementById('cassHistContent').innerHTML='<div class="loading-row">Sin interacciones registradas</div>';return}
+  let h=`<div class="glass-card"><table class="data-table">
+    <thead><tr><th>Timestamp</th><th>Secuencia de pictogramas</th></tr></thead><tbody>`;
+  items.forEach(i=>{
+    const seq=(i.secuencia||[]).map(id=>`<span class="picto-chip">${id}</span>`).join('<span class="arrow-sep">›</span>');
+    const ts=new Date(i.timestamp).toLocaleString('es-AR');
+    h+=`<tr><td style="color:var(--text-muted);font-size:0.82rem;white-space:nowrap">${ts}</td><td><div class="picto-seq">${seq}</div></td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  document.getElementById('cassHistContent').innerHTML=h;
+  const pagDiv=document.getElementById('cassHistPag');
+  pagDiv.innerHTML='';
+  if(pag>1){const b=document.createElement('button');b.className='btn btn-ghost';b.textContent='← Anterior';b.onclick=()=>loadHistorial(pag-1);pagDiv.appendChild(b)}
+  if(items.length===20){const b=document.createElement('button');b.className='btn btn-ghost';b.textContent='Siguiente →';b.onclick=()=>loadHistorial(pag+1);pagDiv.appendChild(b)}
+}
+
+// ═══════════════════════════════════════════
+// CASSANDRA — NUEVA INTERACCIÓN
+// ═══════════════════════════════════════════
+async function guardarInteraccion(){
+  const uid=document.getElementById('newIntUserId').value.trim();
+  const seqRaw=document.getElementById('newIntSeq').value;
+  if(!uid||!seqRaw){toast('Completá todos los campos','error');return}
+  const secuencia=seqRaw.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+  if(!secuencia.length){toast('Secuencia inválida','error');return}
+  try{
+    const r=await fetch(`${CASS_API}/interacciones`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario_id:uid,secuencia})});
+    if(!r.ok)throw new Error('Error al guardar');
+    toast('Interacción guardada en Cassandra','success');
+    document.getElementById('newIntUserId').value='';document.getElementById('newIntSeq').value='';
+  }catch(e){toast(e.message,'error')}
+}
+
+// ═══════════════════════════════════════════
+// NEO4J — GRAFO VISUAL
+// ═══════════════════════════════════════════
+const PICTOS=[
+  {id:1,label:'Hola',x:400,y:80},
+  {id:2,label:'Quiero',x:200,y:180},
+  {id:3,label:'Gracias',x:600,y:180},
+  {id:4,label:'Agua',x:120,y:300},
+  {id:5,label:'Comer',x:280,y:300},
+  {id:6,label:'Jugar',x:400,y:280},
+  {id:7,label:'¿Cómo?',x:560,y:300},
+  {id:8,label:'Bien',x:680,y:280},
+  {id:9,label:'Por favor',x:200,y:420},
+  {id:10,label:'Sí',x:380,y:420},
+  {id:11,label:'No',x:500,y:420},
+  {id:12,label:'Dormir',x:100,y:420},
+];
+const EDGES=[[1,2],[1,3],[1,7],[2,4],[2,5],[2,6],[3,8],[7,8],[7,9],[5,9],[5,10],[6,10],[6,11],[4,12],[9,10]];
+
+function drawNeo(){
+  const svg=document.getElementById('neoGraph');
+  svg.innerHTML='';
+  const defs=document.createElementNS('http://www.w3.org/2000/svg','defs');
+  defs.innerHTML=`<marker id="na" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="rgba(79,195,247,0.4)" stroke-width="1.5"/></marker>`;
+  svg.appendChild(defs);
+  EDGES.forEach(([a,b])=>{
+    const na=PICTOS.find(p=>p.id===a),nb=PICTOS.find(p=>p.id===b);
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',na.x);line.setAttribute('y1',na.y);
+    line.setAttribute('x2',nb.x);line.setAttribute('y2',nb.y);
+    line.setAttribute('stroke','rgba(79,195,247,0.25)');line.setAttribute('stroke-width','1.5');
+    line.setAttribute('marker-end','url(#na)');
+    svg.appendChild(line);
+  });
+  PICTOS.forEach(p=>{
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.style.cursor='pointer';
+    g.addEventListener('click',()=>showNeoInfo(p));
+    g.addEventListener('mouseenter',()=>{c.setAttribute('r','22');c.style.fill='rgba(79,195,247,0.2)'});
+    g.addEventListener('mouseleave',()=>{c.setAttribute('r','18');c.style.fill='rgba(79,195,247,0.1)'});
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','18');
+    c.style.fill='rgba(79,195,247,0.1)';c.style.stroke='rgba(79,195,247,0.5)';c.style.strokeWidth='1.5';
+    c.style.transition='r 0.2s';
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',p.x);t.setAttribute('y',p.y+32);
+    t.setAttribute('text-anchor','middle');t.setAttribute('fill','rgba(240,244,248,0.7)');
+    t.setAttribute('font-size','11');t.setAttribute('font-family','DM Sans,sans-serif');
+    t.textContent=p.label;
+    const tid=document.createElementNS('http://www.w3.org/2000/svg','text');
+    tid.setAttribute('x',p.x);tid.setAttribute('y',p.y+4);
+    tid.setAttribute('text-anchor','middle');tid.setAttribute('fill','rgba(79,195,247,0.9)');
+    tid.setAttribute('font-size','11');tid.setAttribute('font-family','DM Sans,sans-serif');tid.setAttribute('font-weight','600');
+    tid.textContent=p.id;
+    g.appendChild(c);g.appendChild(t);g.appendChild(tid);
+    svg.appendChild(g);
+  });
+}
+
+function showNeoInfo(p){
+  const outs=EDGES.filter(e=>e[0]===p.id).map(e=>PICTOS.find(x=>x.id===e[1])?.label);
+  const ins=EDGES.filter(e=>e[1]===p.id).map(e=>PICTOS.find(x=>x.id===e[0])?.label);
+  document.getElementById('neoInfo').innerHTML=`
+    <div class="glass-card" style="display:flex;gap:32px;flex-wrap:wrap">
+      <div><div style="font-size:0.75rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Pictograma seleccionado</div>
+        <div style="font-family:Syne,sans-serif;font-size:1.4rem;font-weight:700">${p.label} <span style="color:var(--text-muted);font-size:0.9rem">#${p.id}</span></div></div>
+      <div><div style="font-size:0.75rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Puede seguirle</div>
+        <div class="picto-seq">${outs.map(l=>`<span class="picto-chip">${l}</span>`).join('')||'<span style="color:var(--text-muted)">Ninguno</span>'}</div></div>
+      <div><div style="font-size:0.75rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Puede precederle</div>
+        <div class="picto-seq">${ins.map(l=>`<span class="picto-chip">${l}</span>`).join('')||'<span style="color:var(--text-muted)">Ninguno</span>'}</div></div>
+    </div>`;
+}
+</script>
+</body>
+</html>
