@@ -29,7 +29,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const redis = createClient({ url: REDIS_URL });
+const redis = createClient({
+  url: REDIS_URL,
+  // Reintenta la conexión: clave para Redis en la nube (cortes de red transitorios).
+  socket: { reconnectStrategy: (intentos) => Math.min(intentos * 200, 5000) },
+});
 redis.on("error", (e) => console.error("Redis error:", e.message));
 
 // Claves de Redis por usuario (un SET por lista)
@@ -181,7 +185,14 @@ app.post("/sesion/:usuarioId/agregar", async (req, res) => {
 
 // ===========================================================================
 (async () => {
-  await redis.connect();
+  try {
+    await redis.connect();
+    // Enmascara la password de la URL al loguear (no filtrar credenciales).
+    console.log("Conectado a Redis:", REDIS_URL.replace(/:[^:@/]+@/, ":****@"));
+  } catch (e) {
+    console.error("No se pudo conectar a Redis al iniciar:", e.message);
+    // reconnectStrategy seguirá reintentando en segundo plano; el server igual arranca.
+  }
   app.listen(PORT, () =>
     console.log(`API de Redis en http://localhost:${PORT}  (Neo: ${NEO_API})`)
   );
