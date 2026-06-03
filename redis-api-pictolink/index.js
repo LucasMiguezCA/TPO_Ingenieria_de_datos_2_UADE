@@ -14,14 +14,14 @@
  * (server.js, /padres /siguientes /agregar) pasándole las dos listas, así
  * Neo devuelve los pictos ya filtrados para ese usuario.
  *
- * Puerto: 4000  ·  API de Neo: http://localhost:3000
+ * Puerto: 4000  ·  API de Neo: http://localhost:3001
  */
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("redis");
 
 const PORT = process.env.PORT || 4000;
-const NEO_API = process.env.NEO_API_URL || "http://localhost:3000";
+const NEO_API = process.env.NEO_API_URL || "http://localhost:3001";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const TTL = 3600; // 1 hora de sesión
 

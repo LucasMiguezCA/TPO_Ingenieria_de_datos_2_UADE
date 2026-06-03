@@ -157,6 +157,9 @@ app.post("/agregar", async (req, res) => {
 
 
 
-app.listen(3000, () => {
-  console.log("Servidor en http://localhost:3000");
+// Neo4j escucha en 3001 para no chocar con la API de Mongo (api-picto-express),
+// que usa el 3000. La API de Redis apunta acá vía NEO_API_URL (default 3001).
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Servidor en http://localhost:${PORT}`);
 });
