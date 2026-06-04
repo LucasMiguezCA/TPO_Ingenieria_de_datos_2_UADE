@@ -3,13 +3,23 @@ const neo4j = require("neo4j-driver");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(",") : "*" }));
 app.use(express.json());
+
+// GET /health -> verifica la conexión a Neo4j.
+app.get("/health", async (req, res) => {
+  try {
+    await driver.verifyConnectivity();
+    res.json({ servicio: "ne4j-api (Neo4j)", neo4j: "conectado" });
+  } catch (e) {
+    res.status(503).json({ servicio: "ne4j-api (Neo4j)", neo4j: "desconectado", error: e.message });
+  }
+});
 
 // 🔗 conexión a Neo4j
 const driver = neo4j.driver(
-  "bolt://localhost:7687",
-  neo4j.auth.basic("neo4j", "pictolink"), {
+  process.env.NEO4J_URI || "bolt://localhost:7687",
+  neo4j.auth.basic(process.env.NEO4J_USER || "neo4j", process.env.NEO4J_PASSWORD || "pictolink"), {
   disableLosslessIntegers: true
 }
 );
