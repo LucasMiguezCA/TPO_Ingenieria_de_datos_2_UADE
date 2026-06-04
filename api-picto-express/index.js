@@ -217,6 +217,54 @@ app.post('/api/eliminarElemento/:id', async (req, res) => {
     }
 });
 
+// POST /api/restaurarElemento/:id  -> saca un picto de listaEliminados (lo vuelve a mostrar)
+// Body: { pictogramaId: number }
+app.post('/api/restaurarElemento/:id', async (req, res) => {
+    const pictogramaId = parseInt(req.body.pictogramaId);
+
+    if (isNaN(pictogramaId)) {
+        return res.status(400).json({ mensaje: 'pictogramaId debe ser un número entero' });
+    }
+
+    try {
+        const usuario = await Usuario.findByIdAndUpdate(
+            req.params.id,
+            { $pull: { listaEliminados: pictogramaId } },
+            { new: true }
+        ).select('-password');
+
+        if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+
+        res.json({ mensaje: 'Elemento restaurado', listaEliminados: usuario.listaEliminados });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al restaurar elemento', detalle: error.message });
+    }
+});
+
+// POST /api/quitarElementoPersonalizado/:id  -> saca un picto de listaAdmitidosPersonalizados
+// Body: { pictogramaId: number }
+app.post('/api/quitarElementoPersonalizado/:id', async (req, res) => {
+    const pictogramaId = parseInt(req.body.pictogramaId);
+
+    if (isNaN(pictogramaId)) {
+        return res.status(400).json({ mensaje: 'pictogramaId debe ser un número entero' });
+    }
+
+    try {
+        const usuario = await Usuario.findByIdAndUpdate(
+            req.params.id,
+            { $pull: { listaAdmitidosPersonalizados: pictogramaId } },
+            { new: true }
+        ).select('-password');
+
+        if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+
+        res.json({ mensaje: 'Elemento personalizado quitado', listaAdmitidosPersonalizados: usuario.listaAdmitidosPersonalizados });
+    } catch (error) {
+        res.status(500).json({ mensaje: 'Error al quitar elemento', detalle: error.message });
+    }
+});
+
 // ----- SEED — Poblar con usuarios ficticios -----------------------------------------------------------------------
 // POST /api/seed
 // Body: { cantidad?: number (default 20), limpiar?: boolean (default false) }
