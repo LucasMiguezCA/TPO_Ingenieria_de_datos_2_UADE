@@ -20,18 +20,59 @@
  */
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { createClient } = require("redis");
 
 const PORT = process.env.PORT || 4000;
 const NEO_API = process.env.NEO_API_URL || "http://localhost:3001";
 const MONGO_API = process.env.MONGO_API_URL || "http://localhost:3000";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+// Secreto para verificar el JWT. Debe ser el MISMO valor que en la API de Mongo (api-picto-express).
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-pictolink";
+// Por defecto la auth está APAGADA: así no se rompe nada de lo que ya andaba.
+const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "true";
+// Clave de servicio para las llamadas internas a la API de Mongo (hidratar + writeback).
+// Debe ser el MISMO valor que SERVICE_KEY en api-picto-express.
+const SERVICE_KEY = process.env.SERVICE_KEY || "dev-service-pictolink";
 const TTL = 3600; // 1 hora de sesión
 const CACHE_TTL = 60; // segundos que vive una respuesta de Neo cacheada
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Middleware de autenticación. Si AUTH_REQUIRED !== 'true', deja pasar todo (no exige token).
+// Si está activo: exige header "Authorization: Bearer <token>", lo verifica y setea req.userId.
+function requireAuth(req, res, next) {
+  if (!AUTH_REQUIRED) return next();
+  const [esquema, token] = (req.headers.authorization || "").split(" ");
+  if (esquema !== "Bearer" || !token) {
+    return res.status(401).json({ mensaje: "Token inválido o ausente" });
+  }
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.userId = payload.userId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ mensaje: "Token inválido o ausente" });
+  }
+}
+
+// Con la auth activa, el usuario solo puede operar SU propia sesión (req.userId === :usuarioId).
+function requireOwnSession(req, res, next) {
+  if (!AUTH_REQUIRED) return next();
+  const dueño = req.params.usuarioId;
+  if (!dueño) {
+    return res.status(500).json({ mensaje: "Parámetro usuarioId no disponible" });
+  }
+  if (String(req.userId) !== String(dueño)) {
+    return res.status(403).json({ mensaje: "No autorizado para esta sesión" });
+  }
+  next();
+}
+
+// Todas las rutas /sesion/:usuarioId* quedan protegidas (auth + dueño de la sesión).
+app.use("/sesion/:usuarioId", requireAuth, requireOwnSession);
 
 const redis = createClient({
   url: REDIS_URL,
@@ -72,7 +113,9 @@ async function neo(path, body) {
 // Trae las dos listas del usuario desde la API de Mongo (hidratación Mongo -> Redis).
 // Mongo expone GET /api/usuarios/:id con listaEliminados y listaAdmitidosPersonalizados.
 async function listasDeMongo(usuarioId) {
-  const r = await fetch(`${MONGO_API}/api/usuarios/${usuarioId}`);
+  const r = await fetch(`${MONGO_API}/api/usuarios/${usuarioId}`, {
+    headers: { "X-Service-Key": SERVICE_KEY },
+  });
   if (!r.ok) throw new Error(`API de Mongo /api/usuarios respondió ${r.status}`);
   const u = await r.json();
   return {
@@ -86,7 +129,7 @@ async function listasDeMongo(usuarioId) {
 function mongoPersist(path, pictoId) {
   fetch(`${MONGO_API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Service-Key": SERVICE_KEY },
     body: JSON.stringify({ pictogramaId: Number(pictoId) }),
   }).catch((e) => console.error(`Writeback a Mongo ${path} falló:`, e.message));
 }
