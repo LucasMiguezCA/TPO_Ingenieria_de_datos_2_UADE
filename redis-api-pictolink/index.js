@@ -4,7 +4,8 @@
  * Rol de Redis en PictoLink: SESIÓN ACTIVA del usuario. Al iniciar sesión, las
  * dos listas del usuario se cargan en Redis DESDE MONGO (con TTL) y la app las
  * lee/escribe rápido desde ahí. Cada cambio se persiste de vuelta en Mongo
- * (write-behind) para que sobreviva al cierre de sesión / expiración del TTL.
+ * (write-behind). Las respuestas de Neo (/padres y /siguientes) se CACHEAN en
+ * Redis con TTL corto y se invalidan cuando cambian las listas o el grafo.
  *
  * Las DOS listas (modelo PictoLink):
  *   - eliminados:      pictos que el usuario NO quiere ver (se ocultan).
@@ -26,6 +27,7 @@ const NEO_API = process.env.NEO_API_URL || "http://localhost:3001";
 const MONGO_API = process.env.MONGO_API_URL || "http://localhost:3000";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const TTL = 3600; // 1 hora de sesión
+const CACHE_TTL = 60; // segundos que vive una respuesta de Neo cacheada
 
 const app = express();
 app.use(cors());
@@ -41,6 +43,11 @@ redis.on("error", (e) => console.error("Redis error:", e.message));
 // Claves de Redis por usuario (un SET por lista)
 const kElim = (u) => `sesion:${u}:eliminados`;
 const kPers = (u) => `sesion:${u}:personalizados`;
+
+// Claves de caché de respuestas de Neo (por usuario)
+const kCachePadres = (u) => `cache:${u}:padres`;
+const kCacheSig = (u, id) => `cache:${u}:siguientes:${id}`;
+const kCacheSigIdx = (u) => `cache:${u}:sigkeys`; // índice de las keys de /siguientes cacheadas
 
 // Lee las dos listas y las devuelve como arrays de números (lo que espera Neo).
 async function leerListas(u) {
@@ -84,6 +91,12 @@ function mongoPersist(path, pictoId) {
   }).catch((e) => console.error(`Writeback a Mongo ${path} falló:`, e.message));
 }
 
+// Invalida TODO lo cacheado del usuario (cuando cambian sus listas o el grafo).
+async function invalidarCache(u) {
+  const sigKeys = await redis.sMembers(kCacheSigIdx(u));
+  await redis.del([kCachePadres(u), kCacheSigIdx(u), ...sigKeys]);
+}
+
 // ===========================================================================
 //  SESIÓN — iniciar / ver / cerrar
 // ===========================================================================
@@ -110,6 +123,7 @@ app.post("/sesion/:usuarioId", async (req, res) => {
     multi.expire(kElim(u), TTL);
     multi.expire(kPers(u), TTL);
     await multi.exec();
+    await invalidarCache(u); // sesión nueva: arrancar sin caché viejo
 
     res.json({ mensaje: "Sesión iniciada", usuario: u, ...(await leerListas(u)) });
   } catch (e) {
@@ -122,16 +136,17 @@ app.get("/sesion/:usuarioId/listas", async (req, res) => {
   res.json(await leerListas(req.params.usuarioId));
 });
 
-// DELETE /sesion/:usuarioId  -> cierra sesión (borra las listas).
+// DELETE /sesion/:usuarioId  -> cierra sesión (borra las listas y el caché).
 app.delete("/sesion/:usuarioId", async (req, res) => {
   const u = req.params.usuarioId;
   // node-redis v4: del toma una key o un ARRAY de keys (no varargs posicionales).
   await redis.del([kElim(u), kPers(u)]);
+  await invalidarCache(u);
   res.json({ mensaje: "Sesión cerrada", usuario: u });
 });
 
 // ===========================================================================
-//  LISTAS — agregar / quitar de cada lista  (con write-behind a Mongo)
+//  LISTAS — agregar / quitar de cada lista  (write-behind a Mongo + invalida caché)
 // ===========================================================================
 
 // POST /sesion/:usuarioId/eliminados  Body: { pictoId }
@@ -142,6 +157,7 @@ app.post("/sesion/:usuarioId/eliminados", async (req, res) => {
   await redis.sAdd(kElim(u), id);
   await redis.sRem(kPers(u), id);
   await redis.expire(kElim(u), TTL);
+  await invalidarCache(u);
   // Mongo: addToSet eliminados + pull personalizados (ya lo hace este endpoint).
   mongoPersist(`/api/eliminarElemento/${u}`, id);
   res.json(await leerListas(u));
@@ -152,6 +168,7 @@ app.delete("/sesion/:usuarioId/eliminados/:pictoId", async (req, res) => {
   const u = req.params.usuarioId;
   const pictoId = req.params.pictoId;
   await redis.sRem(kElim(u), String(pictoId));
+  await invalidarCache(u);
   mongoPersist(`/api/restaurarElemento/${u}`, pictoId);
   res.json(await leerListas(u));
 });
@@ -163,6 +180,7 @@ app.post("/sesion/:usuarioId/personalizados", async (req, res) => {
   await redis.sAdd(kPers(u), id);
   await redis.sRem(kElim(u), id);
   await redis.expire(kPers(u), TTL);
+  await invalidarCache(u);
   // Mongo: addToSet personalizados + sacarlo de eliminados (espeja el SET de Redis).
   mongoPersist(`/api/agregarElementoPersonalizado/${u}`, id);
   mongoPersist(`/api/restaurarElemento/${u}`, id);
@@ -174,37 +192,53 @@ app.delete("/sesion/:usuarioId/personalizados/:pictoId", async (req, res) => {
   const u = req.params.usuarioId;
   const pictoId = req.params.pictoId;
   await redis.sRem(kPers(u), String(pictoId));
+  await invalidarCache(u);
   mongoPersist(`/api/quitarElementoPersonalizado/${u}`, pictoId);
   res.json(await leerListas(u));
 });
 
 // ===========================================================================
-//  PROXY A NEO4J — pictos ya filtrados por las listas de la sesión
+//  PROXY A NEO4J — pictos ya filtrados por las listas (con caché)
 // ===========================================================================
 
-// GET /sesion/:usuarioId/padres  -> palabras de inicio filtradas.
+// GET /sesion/:usuarioId/padres  -> palabras de inicio filtradas (cacheado).
 app.get("/sesion/:usuarioId/padres", async (req, res) => {
+  const u = req.params.usuarioId;
   try {
-    const { eliminados, personalizados } = await leerListas(req.params.usuarioId);
+    const cacheado = await redis.get(kCachePadres(u));
+    if (cacheado) return res.json(JSON.parse(cacheado));
+    const { eliminados, personalizados } = await leerListas(u);
     const data = await neo("/padres", {
       nodosEliminados: eliminados,
       nodosPersonalizados: personalizados,
     });
+    await redis.set(kCachePadres(u), JSON.stringify(data), { EX: CACHE_TTL });
     res.json(data);
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
 });
 
-// POST /sesion/:usuarioId/siguientes  Body: { id }  -> siguientes filtrados.
+// POST /sesion/:usuarioId/siguientes  Body: { id }  -> siguientes filtrados (cacheado).
 app.post("/sesion/:usuarioId/siguientes", async (req, res) => {
+  const u = req.params.usuarioId;
+  const id = Number(req.body.id);
   try {
-    const { eliminados, personalizados } = await leerListas(req.params.usuarioId);
+    const key = kCacheSig(u, id);
+    const cacheado = await redis.get(key);
+    if (cacheado) return res.json(JSON.parse(cacheado));
+    const { eliminados, personalizados } = await leerListas(u);
     const data = await neo("/siguientes", {
-      id: Number(req.body.id),
+      id,
       nodosEliminados: eliminados,
       nodosPersonalizados: personalizados,
     });
+    await redis
+      .multi()
+      .set(key, JSON.stringify(data), { EX: CACHE_TTL })
+      .sAdd(kCacheSigIdx(u), key)
+      .expire(kCacheSigIdx(u), CACHE_TTL)
+      .exec();
     res.json(data);
   } catch (e) {
     res.status(502).json({ error: e.message });
@@ -228,6 +262,7 @@ app.post("/sesion/:usuarioId/agregar", async (req, res) => {
       // Persistir el nuevo picto admitido en Mongo.
       mongoPersist(`/api/agregarElementoPersonalizado/${u}`, nuevoId);
     }
+    await invalidarCache(u); // el grafo cambió: el caché viejo ya no sirve
     res.json({ ...data, ...(await leerListas(u)) });
   } catch (e) {
     res.status(502).json({ error: e.message });
