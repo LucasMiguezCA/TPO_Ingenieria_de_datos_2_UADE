@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const app = express();
 
 const SALT_ROUNDS = 10;
@@ -9,9 +10,30 @@ const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/picto_mongodb';
 // CORS configurable por env: CORS_ORIGINS="http://a,http://b". Por defecto abierto.
 const CORS_ORIGINS = process.env.CORS_ORIGINS;
+// Secreto para firmar/verificar JWT. Debe ser el MISMO valor en la API de Redis.
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-pictolink';
+// Por defecto la auth está APAGADA: así no se rompe nada de lo que ya andaba.
+const AUTH_REQUIRED = process.env.AUTH_REQUIRED === 'true';
 
 app.use(cors({ origin: CORS_ORIGINS ? CORS_ORIGINS.split(',') : '*' }));
 app.use(express.json());
+
+// Middleware de autenticación. Si AUTH_REQUIRED !== 'true', deja pasar todo (no exige token).
+// Si está activo: exige header "Authorization: Bearer <token>", lo verifica y setea req.userId.
+function requireAuth(req, res, next) {
+    if (!AUTH_REQUIRED) return next();
+    const [esquema, token] = (req.headers.authorization || '').split(' ');
+    if (esquema !== 'Bearer' || !token) {
+        return res.status(401).json({ mensaje: 'Token inválido o ausente' });
+    }
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        req.userId = payload.userId;
+        next();
+    } catch (error) {
+        return res.status(401).json({ mensaje: 'Token inválido o ausente' });
+    }
+}
 
 // GET /health -> estado del servicio y de la conexión a Mongo.
 app.get('/health', (req, res) => {
@@ -43,7 +65,7 @@ const Usuario = mongoose.model('Usuario', usuarioSchema);
 // ----- RUTAS CRUD ------------------------------------------------------------------------------
 
 // GET: Obtener todos los usuarios
-app.get('/api/usuarios', async (req, res) => {
+app.get('/api/usuarios', requireAuth, async (req, res) => {
     try {
         const usuarios = await Usuario.find().select('-password');
         res.json(usuarios);
@@ -53,7 +75,7 @@ app.get('/api/usuarios', async (req, res) => {
 });
 
 // GET por ID: Obtener un usuario específico
-app.get('/api/usuarios/:id', async (req, res) => {
+app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
     try {
         const usuario = await Usuario.findById(req.params.id).select('-password');
         if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
@@ -64,7 +86,7 @@ app.get('/api/usuarios/:id', async (req, res) => {
 });
 
 // DELETE: Eliminar un usuario
-app.delete('/api/usuarios/:id', async (req, res) => {
+app.delete('/api/usuarios/:id', requireAuth, async (req, res) => {
     try {
         const usuario = await Usuario.findByIdAndDelete(req.params.id);
         if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
@@ -130,8 +152,16 @@ app.post('/api/iniciarSesion', async (req, res) => {
             return res.status(401).json({ mensaje: 'Contraseña incorrecta' });
         }
 
+        // Firmamos un JWT (8h) que el front guarda y manda en cada request protegido.
+        const token = jwt.sign(
+            { userId: usuario._id, username: usuario.username },
+            JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+
         res.json({
             mensaje: 'Sesión iniciada exitosamente',
+            token,
             usuario: {
                 _id: usuario._id,
                 username: usuario.username,
@@ -148,7 +178,7 @@ app.post('/api/iniciarSesion', async (req, res) => {
 
 // PUT /api/cambiarConfig/:id
 // Body: { colorFondo?, tamañoIconos? }
-app.put('/api/cambiarConfig/:id', async (req, res) => {
+app.put('/api/cambiarConfig/:id', requireAuth, async (req, res) => {
     const { colorFondo, tamañoIconos } = req.body;
 
     if (!colorFondo && !tamañoIconos) {
@@ -176,7 +206,7 @@ app.put('/api/cambiarConfig/:id', async (req, res) => {
 
 // POST /api/agregarElementoPersonalizado/:id
 // Body: { pictogramaId: number }
-app.post('/api/agregarElementoPersonalizado/:id', async (req, res) => {
+app.post('/api/agregarElementoPersonalizado/:id', requireAuth, async (req, res) => {
     const pictogramaId = parseInt(req.body.pictogramaId);
 
     if (isNaN(pictogramaId)) {
@@ -203,7 +233,7 @@ app.post('/api/agregarElementoPersonalizado/:id', async (req, res) => {
 
 // POST /api/eliminarElemento/:id
 // Body: { pictogramaId: number }
-app.post('/api/eliminarElemento/:id', async (req, res) => {
+app.post('/api/eliminarElemento/:id', requireAuth, async (req, res) => {
     const pictogramaId = parseInt(req.body.pictogramaId);
 
     if (isNaN(pictogramaId)) {
@@ -234,7 +264,7 @@ app.post('/api/eliminarElemento/:id', async (req, res) => {
 
 // POST /api/restaurarElemento/:id  -> saca un picto de listaEliminados (lo vuelve a mostrar)
 // Body: { pictogramaId: number }
-app.post('/api/restaurarElemento/:id', async (req, res) => {
+app.post('/api/restaurarElemento/:id', requireAuth, async (req, res) => {
     const pictogramaId = parseInt(req.body.pictogramaId);
 
     if (isNaN(pictogramaId)) {
@@ -258,7 +288,7 @@ app.post('/api/restaurarElemento/:id', async (req, res) => {
 
 // POST /api/quitarElementoPersonalizado/:id  -> saca un picto de listaAdmitidosPersonalizados
 // Body: { pictogramaId: number }
-app.post('/api/quitarElementoPersonalizado/:id', async (req, res) => {
+app.post('/api/quitarElementoPersonalizado/:id', requireAuth, async (req, res) => {
     const pictogramaId = parseInt(req.body.pictogramaId);
 
     if (isNaN(pictogramaId)) {
