@@ -1,0 +1,16 @@
+{
+  "name": "saac-pictolink",
+  "version": "1.0.0",
+  "description": "PictoLink / PictoComm — app de comunicacion aumentativa (AAC). Orquesta las APIs del stack.",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix api-picto-express install && npm --prefix ne4j-api install && npm --prefix redis-api-pictolink install",
+    "dev:mongo": "node api-picto-express/index.js",
+    "dev:neo": "node ne4j-api/server.js",
+    "dev:redis": "node --env-file-if-exists=redis-api-pictolink/.env redis-api-pictolink/index.js",
+    "dev": "concurrently -n mongo,neo,redis -c blue,magenta,red \"npm:dev:mongo\" \"npm:dev:neo\" \"npm:dev:redis\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
