@@ -3,7 +3,8 @@
  * ---------------------------------------------------------------------------
  * Rol de Redis en PictoLink: SESIÓN ACTIVA del usuario. Al iniciar sesión, las
  * dos listas del usuario se cargan en Redis DESDE MONGO (con TTL) y la app las
- * lee/escribe rápido desde ahí, sin golpear las otras bases en cada interacción.
+ * lee/escribe rápido desde ahí. Cada cambio se persiste de vuelta en Mongo
+ * (write-behind) para que sobreviva al cierre de sesión / expiración del TTL.
  *
  * Las DOS listas (modelo PictoLink):
  *   - eliminados:      pictos que el usuario NO quiere ver (se ocultan).
@@ -73,6 +74,16 @@ async function listasDeMongo(usuarioId) {
   };
 }
 
+// Write-behind: persiste un cambio de lista en Mongo SIN frenar la respuesta de
+// la sesión (fire-and-forget). Si Mongo falla, se loguea y la sesión sigue.
+function mongoPersist(path, pictoId) {
+  fetch(`${MONGO_API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pictogramaId: Number(pictoId) }),
+  }).catch((e) => console.error(`Writeback a Mongo ${path} falló:`, e.message));
+}
+
 // ===========================================================================
 //  SESIÓN — iniciar / ver / cerrar
 // ===========================================================================
@@ -120,7 +131,7 @@ app.delete("/sesion/:usuarioId", async (req, res) => {
 });
 
 // ===========================================================================
-//  LISTAS — agregar / quitar de cada lista
+//  LISTAS — agregar / quitar de cada lista  (con write-behind a Mongo)
 // ===========================================================================
 
 // POST /sesion/:usuarioId/eliminados  Body: { pictoId }
@@ -131,13 +142,18 @@ app.post("/sesion/:usuarioId/eliminados", async (req, res) => {
   await redis.sAdd(kElim(u), id);
   await redis.sRem(kPers(u), id);
   await redis.expire(kElim(u), TTL);
+  // Mongo: addToSet eliminados + pull personalizados (ya lo hace este endpoint).
+  mongoPersist(`/api/eliminarElemento/${u}`, id);
   res.json(await leerListas(u));
 });
 
 // DELETE /sesion/:usuarioId/eliminados/:pictoId  -> restaura un picto.
 app.delete("/sesion/:usuarioId/eliminados/:pictoId", async (req, res) => {
-  await redis.sRem(kElim(req.params.usuarioId), String(req.params.pictoId));
-  res.json(await leerListas(req.params.usuarioId));
+  const u = req.params.usuarioId;
+  const pictoId = req.params.pictoId;
+  await redis.sRem(kElim(u), String(pictoId));
+  mongoPersist(`/api/restaurarElemento/${u}`, pictoId);
+  res.json(await leerListas(u));
 });
 
 // POST /sesion/:usuarioId/personalizados  Body: { pictoId }  -> admite un custom.
@@ -147,13 +163,19 @@ app.post("/sesion/:usuarioId/personalizados", async (req, res) => {
   await redis.sAdd(kPers(u), id);
   await redis.sRem(kElim(u), id);
   await redis.expire(kPers(u), TTL);
+  // Mongo: addToSet personalizados + sacarlo de eliminados (espeja el SET de Redis).
+  mongoPersist(`/api/agregarElementoPersonalizado/${u}`, id);
+  mongoPersist(`/api/restaurarElemento/${u}`, id);
   res.json(await leerListas(u));
 });
 
 // DELETE /sesion/:usuarioId/personalizados/:pictoId
 app.delete("/sesion/:usuarioId/personalizados/:pictoId", async (req, res) => {
-  await redis.sRem(kPers(req.params.usuarioId), String(req.params.pictoId));
-  res.json(await leerListas(req.params.usuarioId));
+  const u = req.params.usuarioId;
+  const pictoId = req.params.pictoId;
+  await redis.sRem(kPers(u), String(pictoId));
+  mongoPersist(`/api/quitarElementoPersonalizado/${u}`, pictoId);
+  res.json(await leerListas(u));
 });
 
 // ===========================================================================
@@ -203,6 +225,8 @@ app.post("/sesion/:usuarioId/agregar", async (req, res) => {
     if (nuevoId != null) {
       await redis.sAdd(kPers(u), String(nuevoId));
       await redis.expire(kPers(u), TTL);
+      // Persistir el nuevo picto admitido en Mongo.
+      mongoPersist(`/api/agregarElementoPersonalizado/${u}`, nuevoId);
     }
     res.json({ ...data, ...(await leerListas(u)) });
   } catch (e) {
