@@ -1,15 +1,30 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const cors = require('cors');
 const app = express();
 
 const SALT_ROUNDS = 10;
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/picto_mongodb';
+// CORS configurable por env: CORS_ORIGINS="http://a,http://b". Por defecto abierto.
+const CORS_ORIGINS = process.env.CORS_ORIGINS;
 
+app.use(cors({ origin: CORS_ORIGINS ? CORS_ORIGINS.split(',') : '*' }));
 app.use(express.json());
 
+// GET /health -> estado del servicio y de la conexión a Mongo.
+app.get('/health', (req, res) => {
+    const estados = ['desconectado', 'conectado', 'conectando', 'desconectando'];
+    const rs = mongoose.connection.readyState;
+    res.status(rs === 1 ? 200 : 503).json({
+        servicio: 'api-picto-express (Mongo)',
+        mongo: estados[rs] ?? rs,
+    });
+});
+
 // ----- Conectar a MongoDB ----------------------------------------------------------------------------
-mongoose.connect('mongodb://127.0.0.1:27017/picto_mongodb')
+mongoose.connect(MONGO_URI)
     .then(() => console.log('Conectado exitosamente a MongoDB'))
     .catch(err => console.error('Error al conectar a MongoDB:', err));
 
