@@ -97,6 +97,23 @@ async function invalidarCache(u) {
   await redis.del([kCachePadres(u), kCacheSigIdx(u), ...sigKeys]);
 }
 
+// GET /health -> ping a Redis + targets de Neo y Mongo (para diagnóstico).
+app.get("/health", async (req, res) => {
+  try {
+    const pong = await redis.ping();
+    res.json({
+      servicio: "redis-api-pictolink",
+      redis: pong === "PONG" ? "conectado" : pong,
+      neoApi: NEO_API,
+      mongoApi: MONGO_API,
+    });
+  } catch (e) {
+    res
+      .status(503)
+      .json({ servicio: "redis-api-pictolink", redis: "desconectado", error: e.message });
+  }
+});
+
 // ===========================================================================
 //  SESIÓN — iniciar / ver / cerrar
 // ===========================================================================
