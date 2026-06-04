@@ -14,6 +14,9 @@ const CORS_ORIGINS = process.env.CORS_ORIGINS;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-pictolink';
 // Por defecto la auth está APAGADA: así no se rompe nada de lo que ya andaba.
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === 'true';
+// Clave de servicio para llamadas internas entre APIs (la API de Redis la usa para
+// hidratar listas y persistir cambios sin un token de usuario). MISMO valor en ambas.
+const SERVICE_KEY = process.env.SERVICE_KEY || 'dev-service-pictolink';
 
 app.use(cors({ origin: CORS_ORIGINS ? CORS_ORIGINS.split(',') : '*' }));
 app.use(express.json());
@@ -22,6 +25,8 @@ app.use(express.json());
 // Si está activo: exige header "Authorization: Bearer <token>", lo verifica y setea req.userId.
 function requireAuth(req, res, next) {
     if (!AUTH_REQUIRED) return next();
+    // Llamada interna de otra API del stack (ej. la API de Redis) con la service key.
+    if (req.headers['x-service-key'] && req.headers['x-service-key'] === SERVICE_KEY) return next();
     const [esquema, token] = (req.headers.authorization || '').split(' ');
     if (esquema !== 'Bearer' || !token) {
         return res.status(401).json({ mensaje: 'Token inválido o ausente' });
