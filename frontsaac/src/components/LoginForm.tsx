@@ -1,9 +1,11 @@
 import { router } from "expo-router";
+import { useRouter } from "expo-router";
 import { View, TextInput, Button,  } from "react-native";
 import { useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginForm() {
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setIsLoading] = useState(false);
@@ -73,18 +75,23 @@ export default function LoginForm() {
       setMensaje("registrado correctamente")
       setUsuarioCargado({token: data.token, usuario: data.usuario})
       console.log(usuarioCargado)
-      router.replace("/dashboard");
+      
 
       await AsyncStorage.setItem(
         "tokenUsuario",
         data.token
       );
 
+      router.replace("/dashboard");
 
 
     
     }
-    catch (e) {}
+    catch (e) {
+      console.log(e)
+      setMensaje("error inesperado")
+
+    }
     
   };
 
@@ -108,6 +115,11 @@ export default function LoginForm() {
       <Button
         title="Ingresar"
         onPress={iniciarSesion}
+      />
+
+      <Button
+        title="desea registrarse"
+        onPress={() => {() => {router.replace("/register")}}}
       />
     </View>
   );
