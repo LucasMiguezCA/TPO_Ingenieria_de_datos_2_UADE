@@ -1,13 +1,7 @@
-<<<<<<< HEAD
-import { router } from "expo-router";
 import { useRouter } from "expo-router";
-import { View, TextInput, Button,  } from "react-native";
-=======
-import { useRouter } from "expo-router";
-import { View, TextInput, Button } from "react-native";
->>>>>>> bdcb785cfab57a51155f915b98c397998e2a3c3d
+import { View, TextInput, Pressable, Text, StyleSheet } from "react-native";
 import { useState } from "react";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -20,7 +14,7 @@ export default function LoginForm() {
 
   const registrarse = () => {
     router.replace("/register");
-  }
+  };
 
   const iniciarSesion = async () => {
     setIsLoading(true);
@@ -28,8 +22,10 @@ export default function LoginForm() {
       username,
       password,
     };
+
     try {
       const datos = JSON.stringify(informacion);
+
       const response = await fetch(
         "http://localhost:3000/api/iniciarSesion",
         {
@@ -40,13 +36,19 @@ export default function LoginForm() {
           body: datos,
         }
       );
+
       const data = await response.json();
 
-      if (response.status === 400 || response.status === 404 || response.status === 401) {
+      if (
+        response.status === 400 ||
+        response.status === 404 ||
+        response.status === 401
+      ) {
         setError(true);
         setMensaje(data?.mensaje ?? "Credenciales inválidas");
         return;
       }
+
       if (!response.ok) {
         setError(true);
         setMensaje("Error inesperado");
@@ -71,42 +73,23 @@ export default function LoginForm() {
         setMensaje(redisData?.mensaje ?? "Acceso denegado");
         return;
       }
+
       if (!redisResponse.ok) {
         setError(true);
         setMensaje(redisData?.mensaje ?? "Error inesperado en Redis");
         return;
       }
 
-<<<<<<< HEAD
-      setError(false)
-      setMensaje("registrado correctamente")
-      setUsuarioCargado({token: data.token, usuario: data.usuario})
-      console.log(usuarioCargado)
-      
-
-      await AsyncStorage.setItem(
-        "tokenUsuario",
-        data.token
-      );
-
-      router.replace("/dashboard");
-
-
-    
-    }
-    catch (e) {
-      console.log(e)
-      setMensaje("error inesperado")
-
-    }
-    
-=======
       await AsyncStorage.setItem("tokenUsuario", data.token);
+
       setError(false);
       setMensaje("Registrado correctamente");
-      setUsuarioCargado({ token: data.token, usuario: data.usuario });
-      console.log({ usuarioCargado, data });
-      
+
+      setUsuarioCargado({
+        token: data.token,
+        usuario: data.usuario,
+      });
+
       router.replace("/dashboard");
     } catch (e) {
       console.error("Login error:", e);
@@ -115,39 +98,188 @@ export default function LoginForm() {
     } finally {
       setIsLoading(false);
     }
->>>>>>> bdcb785cfab57a51155f915b98c397998e2a3c3d
   };
 
   return (
-    <View style={{ padding: 20 }}>
-      <TextInput
-        placeholder="Email"
-        value={username}
-        onChangeText={setUsername}
-      />
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>PictoLink</Text>
 
-      <TextInput
-        placeholder="Contraseña"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+        <Text style={styles.subtitle}>
+          Comunicación con pictogramas
+        </Text>
 
-      <Button
-        title="Ingresar"
-        onPress={iniciarSesion}
-        disabled={loading}
-      />
+        <View style={styles.form}>
+          <Text style={styles.label}>Usuario</Text>
 
-      <Button
-        title="¿Desea registrarse?"
-        onPress={registrarse}
-      />
+          <TextInput
+            placeholder="Tu nombre de usuario"
+            placeholderTextColor="#9CA3AF"
+            value={username}
+            onChangeText={setUsername}
+            style={styles.input}
+          />
 
-      <Button
-        title="desea registrarse"
-        onPress={() => {() => {router.replace("/register")}}}
-      />
+          <Text style={styles.label}>Contraseña</Text>
+
+          <TextInput
+            placeholder="••••••••"
+            placeholderTextColor="#9CA3AF"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+            style={styles.input}
+          />
+
+          {mensaje ? (
+            <Text
+              style={[
+                styles.message,
+                error ? styles.error : styles.success,
+              ]}
+            >
+              {mensaje}
+            </Text>
+          ) : null}
+
+          <Pressable
+            style={[
+              styles.loginButton,
+              loading && { opacity: 0.7 },
+            ]}
+            onPress={iniciarSesion}
+            disabled={loading}
+          >
+            <Text style={styles.loginButtonText}>
+              {loading ? "Ingresando..." : "Ingresar"}
+            </Text>
+          </Pressable>
+
+          <View style={styles.registerContainer}>
+            <Text style={styles.registerText}>
+              ¿No tenés cuenta?
+            </Text>
+
+            <Pressable onPress={registrarse}>
+              <Text style={styles.registerLink}>
+                {" "}Registrarse
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#EEF3FA",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+
+  card: {
+    backgroundColor: "#F5F8FD",
+    borderRadius: 28,
+    padding: 28,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 15,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    elevation: 6,
+  },
+
+  title: {
+    fontSize: 34,
+    fontWeight: "800",
+    color: "#1F2937",
+    textAlign: "center",
+    marginTop: 10,
+  },
+
+  subtitle: {
+    textAlign: "center",
+    color: "#6B7280",
+    marginTop: 8,
+    marginBottom: 35,
+    fontSize: 15,
+  },
+
+  form: {
+    gap: 10,
+  },
+
+  label: {
+    color: "#4B5563",
+    fontWeight: "600",
+    fontSize: 14,
+    marginTop: 6,
+  },
+
+  input: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    height: 56,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    fontSize: 15,
+  },
+
+  loginButton: {
+    marginTop: 20,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#3366E8",
+    justifyContent: "center",
+    alignItems: "center",
+
+    shadowColor: "#3366E8",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    elevation: 8,
+  },
+
+  loginButtonText: {
+    color: "#FFF",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+
+  registerContainer: {
+    marginTop: 22,
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+
+  registerText: {
+    color: "#6B7280",
+  },
+
+  registerLink: {
+    color: "#3366E8",
+    fontWeight: "700",
+  },
+
+  message: {
+    textAlign: "center",
+    marginTop: 10,
+  },
+
+  error: {
+    color: "#DC2626",
+  },
+
+  success: {
+    color: "#16A34A",
+  },
+});
