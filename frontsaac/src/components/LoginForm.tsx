@@ -1,50 +1,53 @@
-import { router } from "expo-router";
-import { View, TextInput, Button,  } from "react-native";
+import { useRouter } from "expo-router";
+import { View, TextInput, Button } from "react-native";
 import { useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginForm() {
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setIsLoading] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState(false);
-  const [usuarioCargado, setUsuarioCargado] = useState({})
+  const [usuarioCargado, setUsuarioCargado] = useState({});
 
-
-
+  const registrarse = () => {
+    router.replace("/register");
+  }
 
   const iniciarSesion = async () => {
+    setIsLoading(true);
     const informacion = {
       username,
-      password
-    }
+      password,
+    };
     try {
-      const datos = JSON.stringify(informacion)
+      const datos = JSON.stringify(informacion);
       const response = await fetch(
-          "http://localhost:3000/api/iniciarSesion",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: datos,
-          }
-          
-        );
-      const data = await response.json()
-      if (response.status == 400 || response.status == 404 || response.status == 401) {
-        setError(true)
-        setMensaje(data?.mensaje)
-        return
+        "http://localhost:3000/api/iniciarSesion",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: datos,
+        }
+      );
+      const data = await response.json();
+
+      if (response.status === 400 || response.status === 404 || response.status === 401) {
+        setError(true);
+        setMensaje(data?.mensaje ?? "Credenciales inválidas");
+        return;
       }
       if (!response.ok) {
-        setError(true)
-        setMensaje("Error inesperado")
+        setError(true);
+        setMensaje("Error inesperado");
+        return;
       }
 
-
-    const redisResponse = await fetch(
+      const redisResponse = await fetch(
         `http://192.168.1.100:4000/sesion/${data.usuario._id}`,
         {
           method: "POST",
@@ -54,38 +57,34 @@ export default function LoginForm() {
           },
         }
       );
-      
 
       const redisData = await redisResponse.json();
 
       if (redisResponse.status === 403) {
         setError(true);
-        setMensaje(redisData?.mensaje);
+        setMensaje(redisData?.mensaje ?? "Acceso denegado");
         return;
       }
       if (!redisResponse.ok) {
         setError(true);
-        setMensaje("Error inesperado en Redis");
+        setMensaje(redisData?.mensaje ?? "Error inesperado en Redis");
         return;
       }
 
-      setError(false)
-      setMensaje("registrado correctamente")
-      setUsuarioCargado({token: data.token, usuario: data.usuario})
-      console.log(usuarioCargado)
+      await AsyncStorage.setItem("tokenUsuario", data.token);
+      setError(false);
+      setMensaje("Registrado correctamente");
+      setUsuarioCargado({ token: data.token, usuario: data.usuario });
+      console.log({ usuarioCargado, data });
+      
       router.replace("/dashboard");
-
-      await AsyncStorage.setItem(
-        "tokenUsuario",
-        data.token
-      );
-
-
-
-    
+    } catch (e) {
+      console.error("Login error:", e);
+      setError(true);
+      setMensaje("Error de conexión");
+    } finally {
+      setIsLoading(false);
     }
-    catch (e) {}
-    
   };
 
   return (
@@ -103,11 +102,15 @@ export default function LoginForm() {
         onChangeText={setPassword}
       />
 
-
-
       <Button
         title="Ingresar"
         onPress={iniciarSesion}
+        disabled={loading}
+      />
+
+      <Button
+        title="¿Desea registrarse?"
+        onPress={registrarse}
       />
     </View>
   );
