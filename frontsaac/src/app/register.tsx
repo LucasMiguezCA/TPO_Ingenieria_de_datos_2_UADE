@@ -98,9 +98,9 @@ const register = () => {
                 value={tamanoIconos}
                 onChange={setTamanoIconos}
                 opciones={[
-                  { label: "Chico", value: "1" },
-                  { label: "Mediano", value: "2" },
-                  { label: "Grande", value: "3" },
+                  { label: "Chico", value: "pequeño" },
+                  { label: "Mediano", value: "mediano" },
+                  { label: "Grande", value: "grande" },
                 ]}
               />
             <Button
