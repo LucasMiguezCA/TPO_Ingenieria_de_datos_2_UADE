@@ -59,6 +59,18 @@ mongoose.connect(MONGO_URI)
 const usuarioSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true, trim: true },
     password: { type: String, required: true },
+    rol: { type: String, required: true, enum: ['usuario', 'terapeuta'] },
+    terapeuta: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Usuario',
+        required: function () {
+            return this.rol === 'usuario';
+        }
+    },
+    usuarios: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Usuario'
+    }],
     colorFondo: { type: String, default: '#FFFFFF' },
     tamañoIconos: { type: String, default: 'mediano', enum: ['pequeño', 'mediano', 'grande'] },
     listaEliminados: { type: [Number], default: [] },
@@ -72,7 +84,10 @@ const Usuario = mongoose.model('Usuario', usuarioSchema);
 // GET: Obtener todos los usuarios
 app.get('/api/usuarios', requireAuth, async (req, res) => {
     try {
-        const usuarios = await Usuario.find().select('-password');
+        const usuarios = await Usuario.find()
+            .select('-password')
+            .populate('terapeuta', 'username rol')
+            .populate('usuarios', 'username rol');
         res.json(usuarios);
     } catch (error) {
         res.status(500).json({ mensaje: 'Error al obtener usuarios' });
@@ -82,7 +97,10 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
 // GET por ID: Obtener un usuario específico
 app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
     try {
-        const usuario = await Usuario.findById(req.params.id).select('-password');
+        const usuario = await Usuario.findById(req.params.id)
+            .select('-password')
+            .populate('terapeuta', 'username rol')
+            .populate('usuarios', 'username rol');
         if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
         res.json(usuario);
     } catch (error) {
@@ -102,20 +120,47 @@ app.delete('/api/usuarios/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/registrar
-// Body: { username, password, colorFondo?, tamañoIconos? }
+// Body: { username, password, rol, terapeutaId?, usuarios?[], colorFondo?, tamañoIconos? }
 app.post('/api/registrar', async (req, res) => {
-    const { username, password, colorFondo, tamañoIconos } = req.body;
+    const { username, password, rol, terapeutaId, usuarios, colorFondo, tamañoIconos } = req.body;
 
-    if (!username || !password) {
-        return res.status(400).json({ mensaje: 'username y password son obligatorios' });
+    if (!username || !password || !rol) {
+        return res.status(400).json({ mensaje: 'username, password y rol son obligatorios' });
+    }
+
+    if (!['usuario', 'terapeuta'].includes(rol)) {
+        return res.status(400).json({ mensaje: 'rol debe ser "usuario" o "terapeuta"' });
+    }
+
+    if (rol === 'usuario' && !terapeutaId) {
+        return res.status(400).json({ mensaje: 'usuario debe tener un terapeuta asociado (terapeutaId)' });
+    }
+
+    if (rol === 'usuario' && !mongoose.Types.ObjectId.isValid(terapeutaId)) {
+        return res.status(400).json({ mensaje: 'terapeutaId no es un id válido' });
+    }
+
+    if (rol === 'terapeuta' && usuarios && !Array.isArray(usuarios)) {
+        return res.status(400).json({ mensaje: 'usuarios debe ser un arreglo de ids' });
     }
 
     try {
+        let terapeuta = null;
+        if (rol === 'usuario') {
+            terapeuta = await Usuario.findById(terapeutaId);
+            if (!terapeuta || terapeuta.rol !== 'terapeuta') {
+                return res.status(400).json({ mensaje: 'terapeutaId debe pertenecer a un usuario con rol terapeuta' });
+            }
+        }
+
         const passwordHasheada = await bcrypt.hash(password, SALT_ROUNDS);
 
         const nuevoUsuario = new Usuario({
             username,
             password: passwordHasheada,
+            rol,
+            terapeuta: terapeuta?._id,
+            usuarios: rol === 'terapeuta' ? (usuarios || []) : [],
             colorFondo: colorFondo || '#FFFFFF',
             tamañoIconos: tamañoIconos || 'mediano',
             listaEliminados: [],
@@ -123,6 +168,17 @@ app.post('/api/registrar', async (req, res) => {
         });
 
         await nuevoUsuario.save();
+
+        if (rol === 'usuario') {
+            await Usuario.findByIdAndUpdate(terapeutaId, { $addToSet: { usuarios: nuevoUsuario._id } });
+        }
+
+        if (rol === 'terapeuta' && usuarios && usuarios.length > 0) {
+            await Usuario.updateMany(
+                { _id: { $in: usuarios } },
+                { $set: { terapeuta: nuevoUsuario._id } }
+            );
+        }
 
         const respuesta = nuevoUsuario.toObject();
         delete respuesta.password;
@@ -159,7 +215,7 @@ app.post('/api/iniciarSesion', async (req, res) => {
 
         // Firmamos un JWT (8h) que el front guarda y manda en cada request protegido.
         const token = jwt.sign(
-            { userId: usuario._id, username: usuario.username },
+            { userId: usuario._id, username: usuario.username, rol: usuario.rol },
             JWT_SECRET,
             { expiresIn: '8h' }
         );
@@ -170,6 +226,9 @@ app.post('/api/iniciarSesion', async (req, res) => {
             usuario: {
                 _id: usuario._id,
                 username: usuario.username,
+                rol: usuario.rol,
+                terapeuta: usuario.terapeuta,
+                usuarios: usuario.usuarios,
                 colorFondo: usuario.colorFondo,
                 tamañoIconos: usuario.tamañoIconos,
                 listaEliminados: usuario.listaEliminados,
