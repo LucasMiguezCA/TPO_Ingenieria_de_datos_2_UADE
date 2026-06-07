@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { View, TextInput, TouchableOpacity, Text, StyleSheet } from "react-native";
 import CustomPicker from "../components/CustomPicker";
 import { router } from "expo-router";
+import { MONGO_API } from "@/config";
 
 const register = () => {
     const [username, setUsername] = useState("")
     const [password, setPassword] = useState("")
-    const [colorFondo, setColorFondo] = useState("")
+    const [colorFondo, setColorFondo] = useState("#FFFFFF")
     const [tamanoIconos, setTamanoIconos] = useState("mediano");
     const [terapeutaId, setTerapeutaId] = useState("");
     const [terapeutas, setTerapeutas] = useState<{ label: string; value: string }[]>([]);
@@ -35,7 +36,7 @@ const register = () => {
             setIsLoading(true)
             const datos = JSON.stringify(informacion)
             const response = await fetch(
-                "http://localhost:3000/api/registrar",
+                `${MONGO_API}/api/registrar`,
                 {
                   method: "POST",
                   headers: {
@@ -79,7 +80,7 @@ const register = () => {
       const cargarTerapeutas = async () => {
         setLoadingTerapeutas(true);
         try {
-          const response = await fetch("http://localhost:3000/api/usuarios");
+          const response = await fetch(`${MONGO_API}/api/usuarios`);
           const data = await response.json();
           if (response.ok && Array.isArray(data)) {
             const opciones = data
@@ -212,11 +213,11 @@ const register = () => {
 );
 }
 const colores = [
-  "#1F2937", // gris oscuro
-  "#374151", // gris medio
-  "#6B7280", // gris claro
   "#FFFFFF", // blanco
-  "#000000", // negro
+  "#FFF9C4", // amarillo
+  "#E3F2FD", // azul
+  "#E8F5E9", // verde
+  "#FCE4EC", // rosa
 ];
 const styles = StyleSheet.create({
   container: {

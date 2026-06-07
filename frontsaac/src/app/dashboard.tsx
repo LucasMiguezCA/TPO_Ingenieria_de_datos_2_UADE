@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,10 +13,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-
-// ── RUTAS DIRECTAS A TUS APIs (Ajustá el localhost por tu IP si usás celular físico)
-const REDIS_API = 'http://localhost:4000';
-const NEO4J_API = 'http://localhost:3001';
+import * as Speech from 'expo-speech';
+import { REDIS_API, NEO4J_API } from '@/config';
 
 type Picto = {
   id: number;
@@ -68,7 +66,6 @@ function PictoCard({ picto, onPress, medidas }: { picto: Picto, onPress: () => v
   picto.pictos[0]
     ? `${NEO4J_API}/${picto.pictos[0].replace(/^\/+/, "")}`
     : null;
-  console.log(imgUrl)
   const { cardW, cardH, innerDim, fontSize, fallbackSize } = medidas;
 
   return (
@@ -85,7 +82,7 @@ function PictoCard({ picto, onPress, medidas }: { picto: Picto, onPress: () => v
   );
 }
 
-function PhraseBar({ frase, onBorrar, onLimpiar }: { frase: Picto[], onBorrar: () => void, onLimpiar: () => void }) {
+function PhraseBar({ frase, onBorrar, onLimpiar, onHablar }: { frase: Picto[], onBorrar: () => void, onLimpiar: () => void, onHablar: () => void }) {
   return (
     <View style={s.phraseBar}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={s.phraseScroll}>
@@ -103,8 +100,8 @@ function PhraseBar({ frase, onBorrar, onLimpiar }: { frase: Picto[], onBorrar: (
           })
         )}
       </ScrollView>
-      <TouchableOpacity onPress={onBorrar} style={s.phraseBtn} hitSlop={10}><Text style={s.phraseBtnText}>⌫</Text></TouchableOpacity>
-      <TouchableOpacity onPress={onLimpiar} style={[s.phraseBtn, { backgroundColor: '#EDE9FE' }]} hitSlop={10}><Text style={s.phraseBtnText}>🔊</Text></TouchableOpacity>
+      <TouchableOpacity onPress={onBorrar} onLongPress={onLimpiar} style={s.phraseBtn} hitSlop={10}><Text style={s.phraseBtnText}>⌫</Text></TouchableOpacity>
+      <TouchableOpacity onPress={onHablar} style={[s.phraseBtn, { backgroundColor: '#EDE9FE' }]} hitSlop={10}><Text style={s.phraseBtnText}>🔊</Text></TouchableOpacity>
     </View>
   );
 }
@@ -112,6 +109,7 @@ function PhraseBar({ frase, onBorrar, onLimpiar }: { frase: Picto[], onBorrar: (
 // ── Lógica Principal ──────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const auth = useRef({ uid: '', token: '' });
   const [nombre, setNombre] = useState('Usuario');
   const [pictos, setPictos] = useState<Picto[]>([]);
   const [frase, setFrase] = useState<Picto[]>([]);
@@ -134,14 +132,14 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       const tok = await AsyncStorage.getItem('tokenUsuario');
-      console.log(tok)
       if (!tok) { router.replace('/'); return; }
-      
+
       const payload = parseJwt(tok);
       const uid = String(payload.userId ?? '');
+      auth.current = { uid, token: tok };
       setNombre(String(payload.username ?? 'Usuario'));
 
-      // --- SOLO REDIS: OBTENER COLOR Y TAMAÑO ---
+      // Abrir/hidratar la sesión en Redis (trae color, tamaño y las 2 listas).
       try {
         const resRedis = await fetch(`${REDIS_API}/sesion/${uid}`, {
           method: 'POST',
@@ -149,66 +147,53 @@ export default function Dashboard() {
         });
         const dataRedis = await resRedis.json();
 
-        console.log(dataRedis)
-        
         if (dataRedis.colorFondo) setColorFondo(dataRedis.colorFondo);
-if (dataRedis.tamañoIconos) setTamanoIconos(dataRedis.tamañoIconos);
-
-const pers = dataRedis.personalizados || [];
-const elim = dataRedis.eliminados || [];
-
-setPersonalizados(pers);
-setEliminados(elim);
-
-await cargarPadres(pers, elim);
-        console.log(dataRedis)
+        if (dataRedis.tamañoIconos) setTamanoIconos(dataRedis.tamañoIconos);
+        setPersonalizados(dataRedis.personalizados || []);
+        setEliminados(dataRedis.eliminados || []);
       } catch (err) {
-        console.warn('No se pudo cargar la sesión de Redis:', err);
+        console.warn('No se pudo abrir la sesión en Redis:', err);
       }
 
-      // --- SOLO NEO4J: CARGAR PADRES ---
-      
+      // Pictos iniciales: van POR REDIS (filtra por las listas del usuario y cachea).
+      await cargarPadres();
     })();
   }, []);
 
   // ── Fetchers DIRECTOS a Neo4j ───────────────────────────────────────────────
   
-  async function cargarPadres(pers = personalizados,
-  elim = eliminados) {
+  async function cargarPadres() {
     setCargando(true);
     try {
-      const r = await fetch(`${NEO4J_API}/padres`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-  nodosPersonalizados: pers,
-  nodosEliminados: elim,
-})
+      const { uid, token } = auth.current;
+      // Por Redis: lee las 2 listas de la sesión, filtra y cachea (el front NO toca Neo).
+      const r = await fetch(`${REDIS_API}/sesion/${uid}/padres`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await r.json();
       setPictos(Array.isArray(data) && data.length > 0 ? data : MOCK);
-    } catch { 
-      setPictos(MOCK); 
-    } finally { 
-      setCargando(false); 
+    } catch {
+      setPictos(MOCK);
+    } finally {
+      setCargando(false);
     }
   }
 
   async function cargarSiguientes(picto: Picto) {
     setCargando(true);
     try {
-      const r = await fetch(`${NEO4J_API}/siguientes`, {
+      const { uid, token } = auth.current;
+      const r = await fetch(`${REDIS_API}/sesion/${uid}/siguientes`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: picto.id, nodosPersonalizados: personalizados,
-  nodosEliminados: eliminados, }),
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: picto.id }),
       });
       const data = await r.json();
       setPictos(Array.isArray(data) && data.length > 0 ? data : MOCK);
-    } catch { 
-      setPictos(MOCK); 
-    } finally { 
-      setCargando(false); 
+    } catch {
+      setPictos(MOCK);
+    } finally {
+      setCargando(false);
     }
   }
 
@@ -232,6 +217,14 @@ await cargarPadres(pers, elim);
     await cargarPadres();
   }, []);
 
+  // TTS: el 🔊 lee la frase en voz alta (antes el botón limpiaba por error).
+  const handleHablar = useCallback(() => {
+    const texto = frase.map(p => p.palabra).join(' ');
+    if (!texto) return;
+    Speech.stop();
+    Speech.speak(texto, { language: 'es-AR' });
+  }, [frase]);
+
   const handleLogout = useCallback(async () => {
     await AsyncStorage.removeItem('tokenUsuario');
     router.replace('/');
@@ -247,7 +240,7 @@ await cargarPadres(pers, elim);
             <Text style={s.nombreText} numberOfLines={1}>{nombre}</Text>
           </View>
         </View>
-        <PhraseBar frase={frase} onBorrar={handleBorrar} onLimpiar={handleLimpiar} />
+        <PhraseBar frase={frase} onBorrar={handleBorrar} onLimpiar={handleLimpiar} onHablar={handleHablar} />
         <TouchableOpacity onPress={handleLogout} style={s.logoutBtn} hitSlop={10}><Text style={s.logoutIcon}>↪</Text></TouchableOpacity>
       </View>
 

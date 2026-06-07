@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { View, TextInput, Pressable, Text, StyleSheet } from "react-native";
 import { useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { MONGO_API, REDIS_API } from "@/config";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export default function LoginForm() {
       const datos = JSON.stringify(informacion);
 
       const response = await fetch(
-        "http://localhost:3000/api/iniciarSesion",
+        `${MONGO_API}/api/iniciarSesion`,
         {
           method: "POST",
           headers: {
@@ -56,7 +57,7 @@ export default function LoginForm() {
       }
 
       const redisResponse = await fetch(
-        `http://localhost:4000/sesion/${data.usuario._id}`,
+        `${REDIS_API}/sesion/${data.usuario._id}`,
         {
           method: "POST",
           headers: {
@@ -83,7 +84,7 @@ export default function LoginForm() {
       await AsyncStorage.setItem("tokenUsuario", data.token);
 
       setError(false);
-      setMensaje("Registrado correctamente");
+      setMensaje("Sesión iniciada");
 
       setUsuarioCargado({
         token: data.token,
