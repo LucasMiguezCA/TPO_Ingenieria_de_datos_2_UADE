@@ -116,11 +116,18 @@ async function listasDeMongo(usuarioId) {
   const r = await fetch(`${MONGO_API}/api/usuarios/${usuarioId}`, {
     headers: { "X-Service-Key": SERVICE_KEY },
   });
-  if (!r.ok) throw new Error(`API de Mongo /api/usuarios respondió ${r.status}`);
+
+  if (!r.ok) {
+    throw new Error(`API de Mongo /api/usuarios respondió ${r.status}`);
+  }
+
   const u = await r.json();
+
   return {
     eliminados: u.listaEliminados || [],
     personalizados: u.listaAdmitidosPersonalizados || [],
+    colorFondo: u.colorFondo || "#EEF0F8",
+    tamañoIconos: u.tamañoIconos || "mediano",
   };
 }
 
@@ -167,11 +174,19 @@ app.get("/health", async (req, res) => {
 app.post("/sesion/:usuarioId", async (req, res) => {
   const u = req.params.usuarioId;
   try {
-    let { eliminados, personalizados } = req.body;
+    let eliminados;
+let personalizados;
+let colorFondo;
+let tamañoIconos;
+
+({
+  eliminados,
+  personalizados,
+  colorFondo,
+  tamañoIconos
+} = await listasDeMongo(u));
     // Si el body no trae las listas, las buscamos en Mongo.
-    if (eliminados === undefined && personalizados === undefined) {
-      ({ eliminados, personalizados } = await listasDeMongo(u));
-    }
+   
     eliminados = eliminados || [];
     personalizados = personalizados || [];
 
@@ -185,7 +200,13 @@ app.post("/sesion/:usuarioId", async (req, res) => {
     await multi.exec();
     await invalidarCache(u); // sesión nueva: arrancar sin caché viejo
 
-    res.json({ mensaje: "Sesión iniciada", usuario: u, ...(await leerListas(u)) });
+    res.json({
+  mensaje: "Sesión iniciada",
+  usuario: u,
+  colorFondo,
+  tamañoIconos,
+  ...(await leerListas(u)),
+});
   } catch (e) {
     res.status(502).json({ error: e.message });
   }

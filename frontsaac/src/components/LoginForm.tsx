@@ -56,7 +56,7 @@ export default function LoginForm() {
       }
 
       const redisResponse = await fetch(
-        `http://192.168.1.100:4000/sesion/${data.usuario._id}`,
+        `http://localhost:4000/sesion/${data.usuario._id}`,
         {
           method: "POST",
           headers: {

@@ -5,6 +5,12 @@ const cors = require("cors");
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(",") : "*" }));
 app.use(express.json());
+const path = require("path");
+
+app.use(
+  "/pictogramas",
+  express.static(path.join(__dirname, "pictogramas"))
+);
 
 // GET /health -> verifica la conexión a Neo4j.
 app.get("/health", async (req, res) => {

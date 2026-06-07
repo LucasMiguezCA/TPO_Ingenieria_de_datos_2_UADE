@@ -7,7 +7,7 @@ const register = () => {
     const [username, setUsername] = useState("")
     const [password, setPassword] = useState("")
     const [colorFondo, setColorFondo] = useState("")
-    const [tamanoIconos, setTamanoIconos] = useState<string>("1");
+    const [tamanoIconos, setTamanoIconos] = useState("mediano");
     const [terapeutaId, setTerapeutaId] = useState("");
     const [terapeutas, setTerapeutas] = useState<{ label: string; value: string }[]>([]);
     const [loading, setIsLoading] = useState(false);
@@ -162,9 +162,9 @@ const register = () => {
         value={tamanoIconos}
         onChange={setTamanoIconos}
         opciones={[
-          { label: "Chico", value: "1" },
-          { label: "Mediano", value: "2" },
-          { label: "Grande", value: "3" },
+          { label: "Chico", value: "pequeño" },
+          { label: "Mediano", value: "mediano" },
+          { label: "Grande", value: "grande" },
         ]}
       />
 
@@ -325,3 +325,4 @@ const styles = StyleSheet.create({
   },
 });
 export default register
+
