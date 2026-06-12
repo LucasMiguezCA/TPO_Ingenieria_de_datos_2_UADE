@@ -228,23 +228,42 @@ export default function Dashboard() {
   }
 
   async function cargarSiguientes(picto: Picto) {
-    setCargando(true);
-    try {
-      const { uid, token } = auth.current;
-      const r = await fetch(`${REDIS_API}/sesion/${uid}/siguientes`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: picto.id }),
-      });
-      const data = await r.json();
-      setPictos(Array.isArray(data) && data.length > 0 ? data : MOCK);
-    } catch {
-      setPictos(MOCK);
-    } finally {
-      setCargando(false);
-    }
-  }
+  setCargando(true);
 
+  try {
+    const { uid, token } = auth.current;
+
+    const r = await fetch(
+      `${REDIS_API}/sesion/${uid}/siguientes`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: picto.id }),
+      }
+    );
+
+    const data = await r.json();
+
+    if (Array.isArray(data) && data.length > 0) {
+      setPictos(data);
+    } else {
+      
+      setPictos([]);        // limpia la grilla primero
+      await cargarPadres(); // vuelve al nivel raíz
+    }
+
+  } catch (error) {
+    console.error(error);
+
+    setPictos([]);
+    await cargarPadres();
+  } finally {
+    setCargando(false);
+  }
+}
   async function refrescarVistaActual() {
     if (frase.length === 0) await cargarPadres();
     else await cargarSiguientes(frase[frase.length - 1]);

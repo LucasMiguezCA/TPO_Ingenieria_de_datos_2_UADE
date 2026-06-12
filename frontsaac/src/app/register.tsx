@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { View, TextInput, TouchableOpacity, Text, StyleSheet } from "react-native";
+import { View, TextInput, TouchableOpacity, Text, StyleSheet, ScrollView } from "react-native";
 import CustomPicker from "../components/CustomPicker";
 import { router } from "expo-router";
 import { MONGO_API } from "@/config";
@@ -114,7 +114,7 @@ const register = () => {
     }, []);
 
   return (
-  <View style={styles.container}>
+  <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
     <View style={styles.card}>
       <Text style={styles.title}>Crear cuenta</Text>
 
@@ -209,7 +209,7 @@ const register = () => {
         </Text>
       </TouchableOpacity>
     </View>
-  </View>
+  </ScrollView>
 );
 }
 const colores = [
@@ -221,11 +221,11 @@ const colores = [
 ];
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    backgroundColor: "#EEF3FA",
-  },
+  flex: 1,
+  justifyContent: "center",
+  paddingHorizontal: 24,
+  backgroundColor: "#EEF3FA",
+},
 
   card: {
     backgroundColor: "#F5F8FD",
