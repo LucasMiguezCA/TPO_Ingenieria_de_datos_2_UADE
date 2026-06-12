@@ -235,12 +235,23 @@ app.delete("/sesion/:usuarioId", async (req, res) => {
 app.post("/sesion/:usuarioId/eliminados", async (req, res) => {
   const u = req.params.usuarioId;
   const id = String(req.body.pictoId);
+
+  console.log("=== ELIMINAR REDIS ===");
+  console.log("usuario:", u);
+  console.log("picto:", id);
+
   await redis.sAdd(kElim(u), id);
+
+  const eliminados = await redis.sMembers(kElim(u));
+
+  console.log("lista eliminados:", eliminados);
+
   await redis.sRem(kPers(u), id);
   await redis.expire(kElim(u), TTL);
   await invalidarCache(u);
-  // Mongo: addToSet eliminados + pull personalizados (ya lo hace este endpoint).
+
   mongoPersist(`/api/eliminarElemento/${u}`, id);
+
   res.json(await leerListas(u));
 });
 

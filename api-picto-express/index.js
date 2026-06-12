@@ -297,13 +297,15 @@ app.post('/api/agregarElementoPersonalizado/:id', requireAuth, async (req, res) 
 
 // POST /api/eliminarElemento/:id
 // Body: { pictogramaId: number }
-app.post('/api/eliminarElemento/:id', requireAuth, async (req, res) => {
+app.post('/api/eliminarElemento/:id', async (req, res) => {
     const pictogramaId = parseInt(req.body.pictogramaId);
 
     if (isNaN(pictogramaId)) {
         return res.status(400).json({ mensaje: 'pictogramaId debe ser un número entero' });
     }
-
+    console.log('eliminando en mongo')
+    console.log(pictogramaId); 
+   
     try {
         const usuario = await Usuario.findByIdAndUpdate(
             req.params.id,
