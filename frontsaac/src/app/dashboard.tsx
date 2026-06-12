@@ -24,9 +24,10 @@ import { REDIS_API, NEO4J_API, MONGO_API } from '@/config'; // <-- Agregado MONG
 type Picto = {
   id: number | string;
   palabra: string;
-  peso?: number;
   pictos: string[];
   isAddButton?: boolean;
+  isContinue?: boolean;
+  isHome?: boolean; // <-- Agregado al tipo para tipado correcto
 };
 
 // ── Paleta automática y Medidas ───────────────────────────────────────────────
@@ -74,6 +75,20 @@ const MOCK: Picto[] = [
   { id: 2, palabra: 'quiero', pictos: [] },
   { id: 3, palabra: 'comer', pictos: [] },
 ];
+
+const VOLVER_INICIO: Picto = {
+  id: 'home',
+  palabra: 'Volver al inicio',
+  pictos: [],
+  isHome: true, // <-- Corregido: agregado flag para handleTap
+};
+
+const CONTINUAR_FRASE: Picto = {
+  id: 'continue',
+  palabra: 'Continuar frase',
+  pictos: [],
+  isContinue: true, // <-- Corregido: agregado flag para handleTap
+};
 
 // ── Helper para URL de Imágenes ───────────────────────────────────────────────
 const obtenerUrlImagen = (ruta?: string) => {
@@ -179,6 +194,8 @@ export default function Dashboard() {
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
   const [mensajePerfil, setMensajePerfil] = useState({ texto: '', error: false });
 
+  const [modoContinuarFrase, setModoContinuarFrase] = useState(true);
+
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     return () => { ScreenOrientation.unlockAsync(); };
@@ -228,42 +245,39 @@ export default function Dashboard() {
   }
 
   async function cargarSiguientes(picto: Picto) {
-  setCargando(true);
+    setCargando(true);
+    try {
+      const { uid, token } = auth.current;
+      const r = await fetch(
+        `${REDIS_API}/sesion/${uid}/siguientes`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ id: picto.id }),
+        }
+      );
 
-  try {
-    const { uid, token } = auth.current;
+      const data = await r.json();
 
-    const r = await fetch(
-      `${REDIS_API}/sesion/${uid}/siguientes`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ id: picto.id }),
+      if (Array.isArray(data) && data.length > 0) {
+        setPictos(data);
+      } else {
+        setPictos([
+          VOLVER_INICIO,
+          CONTINUAR_FRASE
+        ]);
       }
-    );
-
-    const data = await r.json();
-
-    if (Array.isArray(data) && data.length > 0) {
-      setPictos(data);
-    } else {
-      
-      setPictos([]);        // limpia la grilla primero
-      await cargarPadres(); // vuelve al nivel raíz
+    } catch (error) {
+      console.error(error);
+      setPictos([VOLVER_INICIO]);
+    } finally {
+      setCargando(false);
     }
-
-  } catch (error) {
-    console.error(error);
-
-    setPictos([]);
-    await cargarPadres();
-  } finally {
-    setCargando(false);
   }
-}
+
   async function refrescarVistaActual() {
     if (frase.length === 0) await cargarPadres();
     else await cargarSiguientes(frase[frase.length - 1]);
@@ -271,7 +285,6 @@ export default function Dashboard() {
 
   // ── Lógica Nodos (Crear / Eliminar) ──
   const handleSeleccionarImagen = async () => {
-   
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -293,32 +306,28 @@ export default function Dashboard() {
       // 1. Preparamos los datos incluyendo la imagen
       const formData = new FormData();
       formData.append('nuevaPalabra', formPalabra.trim());
-      //(formImagenUri && formImagenUri.startsWith('file://'))
-      // Le sacamos el condicional de 'file://' para que entre siempre que haya imagen
-    if (formImagenUri) {
-      if (Platform.OS === 'web') {
-        // LÓGICA PARA LA WEB (PC)
-        // Buscamos el archivo temporal en el navegador y lo convertimos a Blob
-        const responseFile = await fetch(formImagenUri);
-        const blob = await responseFile.blob();
-        formData.append('imagen', blob, 'pictograma.png');
-      } else {
-        // LÓGICA PARA CELULARES (Android / iOS)
-        const filename = formImagenUri.split('/').pop() || 'pictograma.png';
-        formData.append('imagen', {
-          uri: formImagenUri,
-          name: filename,
-          type: 'image/png'
-        } as any);
+      
+      if (formImagenUri) {
+        if (Platform.OS === 'web') {
+          // LÓGICA PARA LA WEB (PC)
+          const responseFile = await fetch(formImagenUri);
+          const blob = await responseFile.blob();
+          formData.append('imagen', blob, 'pictograma.png');
+        } else {
+          // LÓGICA PARA CELULARES (Android / iOS)
+          const filename = formImagenUri.split('/').pop() || 'pictograma.png';
+          formData.append('imagen', {
+            uri: formImagenUri,
+            name: filename,
+            type: 'image/png'
+          } as any);
+        }
       }
-    }
 
       if (frase.length > 0) {
         formData.append('anteriorId', String(frase[frase.length - 1].id));
       }
 
-    
-      
       // 2. Enviamos a la API de Neo4j
       const responseNeo = await fetch(
        `${NEO4J_API}/agregar`,
@@ -326,7 +335,7 @@ export default function Dashboard() {
          method: "POST",
          body: formData
        }
-      )     ;
+      );
 
       if (!responseNeo.ok) throw new Error('Error al guardar el pictograma en la base de datos central');
       
@@ -334,25 +343,23 @@ export default function Dashboard() {
       const nuevoId = dataNeo.nodo.id; // Extraemos el ID que nos devolvió Neo4j
 
       // 3. Si es un nodo NUEVO (no una edición), le avisamos a MongoDB
-      
-      const  responseRedis = await fetch(
-  `${REDIS_API}/sesion/${auth.current.uid}/personalizados`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${auth.current.token}`
-    },
-    body: JSON.stringify({
-      pictoId: nuevoId
-    })
-  }
-);
-
-        if (!responseRedis.ok) {
-          throw new Error('El pictograma se guardó, pero no se pudo vincular a tu perfil');
+      const responseRedis = await fetch(
+        `${REDIS_API}/sesion/${auth.current.uid}/personalizados`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.current.token}`
+          },
+          body: JSON.stringify({
+            pictoId: nuevoId
+          })
         }
-      
+      );
+
+      if (!responseRedis.ok) {
+        throw new Error('El pictograma se guardó, pero no se pudo vincular a tu perfil');
+      }
 
       // 4. Todo salió bien, cerramos el modal y refrescamos
       setModalVisible(false);
@@ -367,46 +374,55 @@ export default function Dashboard() {
   };
 
   const handleEliminarNodo = async (idNodo: string | number) => {
-  try {
-    const { uid, token } = auth.current;
+    try {
+      const { uid, token } = auth.current;
+      console.log("ELIMINANDO", idNodo);
+      setCargando(true);
 
-    console.log("ELIMINANDO", idNodo);
+      const response = await fetch(
+        `${REDIS_API}/sesion/${uid}/eliminados`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            pictoId: Number(idNodo),
+          }),
+        }
+      );
 
-    setCargando(true);
+      const data = await response.json();
+      console.log("status:", response.status);
+      console.log("respuesta:", data);
 
-    const response = await fetch(
-      `${REDIS_API}/sesion/${uid}/eliminados`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          pictoId: Number(idNodo),
-        }),
-      }
-    );
-
-    const data = await response.json();
-
-    console.log("status:", response.status);
-    console.log("respuesta:", data);
-
-    await refrescarVistaActual();
-  } catch (err) {
-    console.error("ERROR ELIMINANDO:", err);
-  } finally {
-    setCargando(false);
-  }
-};
+      await refrescarVistaActual();
+    } catch (err) {
+      console.error("ERROR ELIMINANDO:", err);
+    } finally {
+      setCargando(false);
+    }
+  };
 
   // ── Lógica de Interacción ──
   const handleTap = useCallback(async (picto: Picto) => {
-    
+    // Corregido: "Continuar frase" recarga el nivel raíz de categorías sin borrar la frase superior
+    if (picto.isContinue || picto.id === 'continue') {
+      await cargarPadres();
+      return;
+    }
+
+    // "Volver al inicio" borra todo el progreso acumulado y recarga el nivel raíz
+    if (picto.isHome || picto.id === 'home') {
+      setFrase([]);
+      await cargarPadres();
+      return;
+    }
+
     setFrase(prev => [...prev, picto]);
     await cargarSiguientes(picto);
-  }, [modoEdicion]);
+  }, [frase]);
 
   const handleBorrar = useCallback(async () => {
     if (frase.length === 0) return;
@@ -464,8 +480,8 @@ export default function Dashboard() {
   };
 
   const datosFlatList = modoEdicion
-    ? [...pictos, { id: 'add', palabra: 'Agregar', pictos: [], isAddButton: true }]
-    : pictos;
+  ? [...pictos, { id: 'add', palabra: 'Agregar', pictos: [], isAddButton: true }]
+  : [...pictos, CONTINUAR_FRASE];
 
   return (
     <SafeAreaView style={[s.screen, { backgroundColor: colorFondo }]}>
@@ -519,7 +535,7 @@ export default function Dashboard() {
       <Modal visible={modalVisible} animationType="fade" transparent={true}>
         <View style={s.modalOverlay}>
           <View style={s.modalContenido}>
-            <Text style={s.modalTitulo}>{  'Nuevo Pictograma'}</Text>
+            <Text style={s.modalTitulo}>{'Nuevo Pictograma'}</Text>
             <Text style={s.label}>Palabra asignada:</Text>
             <TextInput style={s.input} value={formPalabra} onChangeText={setFormPalabra} placeholder="Ej: Comer, Yo, Manzana..." />
             <Text style={s.label}>Imagen:</Text>
@@ -643,7 +659,6 @@ const s = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContenido: { width: 450, backgroundColor: 'white', borderRadius: 20, padding: 24, elevation: 10 },
   
-  // Estilos específicos para el Modal de Perfil (inspirado en register.tsx)
   modalCardPerfil: { width: 400, backgroundColor: '#F5F8FD', borderRadius: 28, padding: 28, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 15, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
   modalSubtitulo: { textAlign: 'center', color: '#6B7280', marginTop: 4, marginBottom: 20 },
   colorsContainer: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginVertical: 8 },
