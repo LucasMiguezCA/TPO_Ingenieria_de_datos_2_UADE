@@ -1,0 +1,16 @@
+{
+  "name": "pictolink-redis-api",
+  "version": "1.0.0",
+  "description": "API de sesión (Redis) de PictoLink: maneja las 2 listas por usuario y proxea a la API de Neo4j",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "redis": "^4.7.0"
+  }
+}
