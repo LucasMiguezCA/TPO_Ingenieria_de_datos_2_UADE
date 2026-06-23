@@ -7,6 +7,13 @@
  * (write-behind). Las respuestas de Neo (/padres y /siguientes) se CACHEAN en
  * Redis con TTL corto y se invalidan cuando cambian las listas o el grafo.
  *
+ * DUEÑO DEL TOKEN: la API de Mongo FIRMA el JWT (login), pero Redis gobierna su
+ * VIGENCIA. Cada login trae un jti único; al abrir sesión, Redis lo guarda en una
+ * "allowlist" de sesiones activas con TTL. Un token vale solo si su jti sigue en
+ * Redis: el logout lo borra (revocación instantánea) y la inactividad lo expira
+ * (TTL sliding, renovado en cada request). Así la expiración la maneja Redis, no
+ * el exp del JWT (que queda como techo duro de seguridad).
+ *
  * Las DOS listas (modelo PictoLink):
  *   - eliminados:      pictos que el usuario NO quiere ver (se ocultan).
  *   - personalizados:  pictos custom (nodoPersonalizado) ADMITIDOS para ese
@@ -18,6 +25,7 @@
  *
  * Puerto: 4000 · API de Neo: http://localhost:3001 · API de Mongo: http://localhost:3000
  */
+require('dotenv').config({ path: __dirname + '/.env' });
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
@@ -34,7 +42,7 @@ const AUTH_REQUIRED = process.env.AUTH_REQUIRED === "true";
 // Clave de servicio para las llamadas internas a la API de Mongo (hidratar + writeback).
 // Debe ser el MISMO valor que SERVICE_KEY en api-picto-express.
 const SERVICE_KEY = process.env.SERVICE_KEY || "dev-service-pictolink";
-const TTL = 3600; // 1 hora de sesión
+const TTL = 3600; // 1 h de inactividad (sliding window: cada request renueva el TTL)
 const CACHE_TTL = 60; // segundos que vive una respuesta de Neo cacheada
 
 const app = express();
@@ -52,6 +60,7 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     req.userId = payload.userId;
+    req.jti = payload.jti; // FIX: jti para la allowlist de sesiones activas (Redis, dueño del token)
     next();
   } catch (error) {
     return res.status(401).json({ mensaje: "Token inválido o ausente" });
@@ -71,7 +80,32 @@ function requireOwnSession(req, res, next) {
   next();
 }
 
-// Todas las rutas /sesion/:usuarioId* quedan protegidas (auth + dueño de la sesión).
+// FIX: Redis = dueño de la vigencia del token. Verifica que el jti del JWT siga en la
+// allowlist de sesiones activas. Si no está (logout) o expiró (TTL), el token NO vale,
+// aunque su firma sea válida. Cada request renueva el TTL (sliding window): la sesión
+// vive mientras haya actividad y se expira sola por inactividad.
+async function requireSesionActiva(req, res, next) {
+  if (!AUTH_REQUIRED) return next();
+  try {
+    const u = req.params.usuarioId;
+    const activa = await redis.get(kSesionActiva(req.jti));
+    if (!activa) {
+      return res.status(401).json({ mensaje: "Sesión expirada o cerrada" });
+    }
+    await redis
+      .multi()
+      .expire(kSesionActiva(req.jti), TTL)
+      .expire(kElim(u), TTL)
+      .expire(kPers(u), TTL)
+      .exec();
+    next();
+  } catch (e) {
+    return res.status(503).json({ mensaje: "Error verificando sesión", detalle: e.message });
+  }
+}
+
+// Todas las rutas /sesion/:usuarioId* exigen auth + dueño de la sesión.
+// (La verificación de SESIÓN ACTIVA se monta más abajo, después de abrir sesión.)
 app.use("/sesion/:usuarioId", requireAuth, requireOwnSession);
 
 const redis = createClient({
@@ -84,6 +118,9 @@ redis.on("error", (e) => console.error("Redis error:", e.message));
 // Claves de Redis por usuario (un SET por lista)
 const kElim = (u) => `sesion:${u}:eliminados`;
 const kPers = (u) => `sesion:${u}:personalizados`;
+// FIX: allowlist de sesiones activas, una clave por token (jti). Su existencia = token
+// vigente; su TTL = expiración de la sesión; borrarla = logout.
+const kSesionActiva = (jti) => `sesion:activa:${jti}`;
 
 // Claves de caché de respuestas de Neo (por usuario)
 const kCachePadres = (u) => `cache:${u}:padres`;
@@ -96,7 +133,10 @@ async function leerListas(u) {
     redis.sMembers(kElim(u)),
     redis.sMembers(kPers(u)),
   ]);
-  return { eliminados: elim.map(Number), personalizados: pers.map(Number) };
+  return {
+    eliminados: elim.filter(x => x !== "__init__").map(Number),
+    personalizados: pers.filter(x => x !== "__init__").map(Number),
+  };
 }
 
 // Llama a la API de Neo4j por HTTP.
@@ -116,18 +156,11 @@ async function listasDeMongo(usuarioId) {
   const r = await fetch(`${MONGO_API}/api/usuarios/${usuarioId}`, {
     headers: { "X-Service-Key": SERVICE_KEY },
   });
-
-  if (!r.ok) {
-    throw new Error(`API de Mongo /api/usuarios respondió ${r.status}`);
-  }
-
+  if (!r.ok) throw new Error(`API de Mongo /api/usuarios respondió ${r.status}`);
   const u = await r.json();
-
   return {
     eliminados: u.listaEliminados || [],
     personalizados: u.listaAdmitidosPersonalizados || [],
-    colorFondo: u.colorFondo || "#EEF0F8",
-    tamañoIconos: u.tamañoIconos || "mediano",
   };
 }
 
@@ -174,55 +207,56 @@ app.get("/health", async (req, res) => {
 app.post("/sesion/:usuarioId", async (req, res) => {
   const u = req.params.usuarioId;
   try {
-    let eliminados;
-let personalizados;
-let colorFondo;
-let tamañoIconos;
-
-({
-  eliminados,
-  personalizados,
-  colorFondo,
-  tamañoIconos
-} = await listasDeMongo(u));
+    let { eliminados, personalizados } = req.body;
     // Si el body no trae las listas, las buscamos en Mongo.
-   
+    if (eliminados === undefined && personalizados === undefined) {
+      ({ eliminados, personalizados } = await listasDeMongo(u));
+    }
     eliminados = eliminados || [];
     personalizados = personalizados || [];
 
-    const multi = redis.multi();
+ const multi = redis.multi();
     multi.del(kElim(u));
     multi.del(kPers(u));
-    if (eliminados.length) multi.sAdd(kElim(u), eliminados.map(String));
-    if (personalizados.length) multi.sAdd(kPers(u), personalizados.map(String));
+    multi.sAdd(kElim(u), eliminados.length ? eliminados.map(String) : ["__init__"]);
+    multi.sAdd(kPers(u), personalizados.length ? personalizados.map(String) : ["__init__"]);
     multi.expire(kElim(u), TTL);
     multi.expire(kPers(u), TTL);
+    // FIX: registrar el token (jti) como SESIÓN ACTIVA. Desde acá Redis es la fuente de
+    // verdad: el token vale mientras este jti exista y no expire su TTL.
+    if (AUTH_REQUIRED && req.jti) {
+      multi.set(kSesionActiva(req.jti), String(u), { EX: TTL });
+    }
     await multi.exec();
     await invalidarCache(u); // sesión nueva: arrancar sin caché viejo
 
-    res.json({
-  mensaje: "Sesión iniciada",
-  usuario: u,
-  colorFondo,
-  tamañoIconos,
-  ...(await leerListas(u)),
-});
+    res.json({ mensaje: "Sesión iniciada", usuario: u, ...(await leerListas(u)) });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
 });
+
+// FIX: desde acá, toda ruta /sesion/:usuarioId* exige SESIÓN ACTIVA (jti en allowlist).
+// Va DESPUÉS de "abrir sesión" (que es quien registra el jti) y ANTES del resto, así
+// abrir no se exige a sí mismo. El orden de registro en Express hace de "excepción".
+app.use("/sesion/:usuarioId", requireSesionActiva);
 
 // GET /sesion/:usuarioId/listas  -> devuelve las dos listas.
 app.get("/sesion/:usuarioId/listas", async (req, res) => {
   res.json(await leerListas(req.params.usuarioId));
 });
 
-// DELETE /sesion/:usuarioId  -> cierra sesión (borra las listas y el caché).
+// DELETE /sesion/:usuarioId  -> cierra sesión (borra listas, caché y revoca el token).
 app.delete("/sesion/:usuarioId", async (req, res) => {
   const u = req.params.usuarioId;
   // node-redis v4: del toma una key o un ARRAY de keys (no varargs posicionales).
   await redis.del([kElim(u), kPers(u)]);
   await invalidarCache(u);
+  // FIX: revocar el token. Al borrar su jti de la allowlist, queda inválido AL INSTANTE,
+  // aunque el exp del JWT siga siendo dentro de 8 h.
+  if (AUTH_REQUIRED && req.jti) {
+    await redis.del(kSesionActiva(req.jti));
+  }
   res.json({ mensaje: "Sesión cerrada", usuario: u });
 });
 
@@ -235,23 +269,12 @@ app.delete("/sesion/:usuarioId", async (req, res) => {
 app.post("/sesion/:usuarioId/eliminados", async (req, res) => {
   const u = req.params.usuarioId;
   const id = String(req.body.pictoId);
-
-  console.log("=== ELIMINAR REDIS ===");
-  console.log("usuario:", u);
-  console.log("picto:", id);
-
   await redis.sAdd(kElim(u), id);
-
-  const eliminados = await redis.sMembers(kElim(u));
-
-  console.log("lista eliminados:", eliminados);
-
   await redis.sRem(kPers(u), id);
   await redis.expire(kElim(u), TTL);
   await invalidarCache(u);
-
+  // Mongo: addToSet eliminados + pull personalizados (ya lo hace este endpoint).
   mongoPersist(`/api/eliminarElemento/${u}`, id);
-
   res.json(await leerListas(u));
 });
 

@@ -9,8 +9,8 @@ const register = () => {
     const [password, setPassword] = useState("")
     const [colorFondo, setColorFondo] = useState("#FFFFFF")
     const [tamanoIconos, setTamanoIconos] = useState("mediano");
-    const [terapeutaId, setTerapeutaId] = useState("");
-    const [terapeutas, setTerapeutas] = useState<{ label: string; value: string }[]>([]);
+    
+    
     const [loading, setIsLoading] = useState(false);
     const [loadingTerapeutas, setLoadingTerapeutas] = useState(false);
     const [mensaje, setMensaje] = useState("");
@@ -18,18 +18,15 @@ const register = () => {
     const [usuarioCargado, setUsuarioCargado] = useState({})
 
     const handleRegistrarse = async () => {
-        if (!terapeutaId) {
-            setError(true);
-            setMensaje("Debes seleccionar un terapeuta");
-            return;
-        }
+        
+        
 
         try {
             const informacion = {
                 username,
                 password,
                 rol: 'usuario',
-                terapeutaId,
+                
                 colorFondo,
                 tamañoIconos: tamanoIconos
             }
@@ -76,42 +73,7 @@ const register = () => {
         }
     }
 
-    useEffect(() => {
-      const cargarTerapeutas = async () => {
-        setLoadingTerapeutas(true);
-        try {
-          const response = await fetch(`${MONGO_API}/api/usuarios`);
-          const data = await response.json();
-          if (response.ok && Array.isArray(data)) {
-            const opciones = data
-              .filter((usuario: any) => usuario.rol === 'terapeuta')
-              .map((terapeuta: any) => ({
-                label: terapeuta.username,
-                value: terapeuta._id,
-              }));
-
-            setTerapeutas(opciones);
-            if (opciones.length > 0) {
-              setTerapeutaId(opciones[0].value);
-            } else {
-              setMensaje('No hay terapeutas disponibles actualmente.');
-              setError(true);
-            }
-          } else {
-            setMensaje('No se pudieron cargar los terapeutas');
-            setError(true);
-          }
-        } catch (e) {
-          console.log(e);
-          setMensaje('Error al cargar terapeutas');
-          setError(true);
-        } finally {
-          setLoadingTerapeutas(false);
-        }
-      };
-
-      cargarTerapeutas();
-    }, []);
+   
 
   return (
   <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -170,17 +132,7 @@ const register = () => {
       />
 
       <Text style={styles.label}>Terapeuta</Text>
-      {loadingTerapeutas ? (
-        <Text style={styles.subtext}>Cargando terapeutas...</Text>
-      ) : terapeutas.length > 0 ? (
-        <CustomPicker
-          value={terapeutaId}
-          onChange={setTerapeutaId}
-          opciones={terapeutas}
-        />
-      ) : (
-        <Text style={[styles.subtext, { color: '#DC2626' }]}>No hay terapeutas disponibles</Text>
-      )}
+      
 
       {mensaje !== "" && (
         <Text

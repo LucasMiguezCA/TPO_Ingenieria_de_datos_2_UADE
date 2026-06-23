@@ -19,15 +19,14 @@ import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Speech from 'expo-speech';
 import * as ImagePicker from 'expo-image-picker';
-import { REDIS_API, NEO4J_API, MONGO_API } from '@/config'; // <-- Agregado MONGO_API
+import { REDIS_API, NEO4J_API, MONGO_API, CASSANDRA_API } from '@/config'; 
 
 type Picto = {
   id: number | string;
   palabra: string;
   pictos: string[];
+  imagenUrl?: string | null;
   isAddButton?: boolean;
-  isContinue?: boolean;
-  isHome?: boolean; // <-- Agregado al tipo para tipado correcto
 };
 
 // ── Paleta automática y Medidas ───────────────────────────────────────────────
@@ -40,11 +39,11 @@ const PALETA = [
 ] as const;
 
 const COLORES_PERFIL = [
-  "#FFFFFF", // blanco
-  "#FFF9C4", // amarillo
-  "#E3F2FD", // azul
-  "#E8F5E9", // verde
-  "#FCE4EC", // rosa
+  "#FFFFFF", 
+  "#FFF9C4", 
+  "#E3F2FD", 
+  "#E8F5E9", 
+  "#FCE4EC", 
 ];
 
 const colorDe = (id: number | string) => {
@@ -53,7 +52,6 @@ const colorDe = (id: number | string) => {
 };
 
 const OBTENER_MEDIDAS = (tamaño: string) => {
-  // Ajustado a 'pequeño' para hacer match exacto con el enum de Mongoose
   switch (tamaño) {
     case 'pequeño': return { cardW: 400, cardH: 380, innerDim: 330, fontSize: 23, fallbackSize: 100 };
     case 'grande': return { cardW: 650, cardH: 580, innerDim: 530, fontSize: 27, fallbackSize: 140 };
@@ -76,26 +74,20 @@ const MOCK: Picto[] = [
   { id: 3, palabra: 'comer', pictos: [] },
 ];
 
-const VOLVER_INICIO: Picto = {
-  id: 'home',
-  palabra: 'Volver al inicio',
-  pictos: [],
-  isHome: true, // <-- Corregido: agregado flag para handleTap
-};
+// ── Helper Mejorado para URL de Imágenes (Fix Dashboard 2) ─────────────────────
+const obtenerUrlImagen = (picto?: Picto | null) => {
+  if (!picto) return null;
+  if (picto.imagenUrl) return picto.imagenUrl; // Soporte Cloudinary remoto
 
-const CONTINUAR_FRASE: Picto = {
-  id: 'continue',
-  palabra: 'Continuar frase',
-  pictos: [],
-  isContinue: true, // <-- Corregido: agregado flag para handleTap
-};
-
-// ── Helper para URL de Imágenes ───────────────────────────────────────────────
-const obtenerUrlImagen = (ruta?: string) => {
+  const ruta = picto.pictos && picto.pictos.length > 0 ? picto.pictos[0] : null;
   if (!ruta) return null;
-  if (ruta.startsWith('file://') || ruta.startsWith('http')) return ruta;
   
-  let limpia = ruta.replace(/^\/+/, "");
+  const cleaned = ruta.trim();
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://') || cleaned.startsWith('file://')) {
+    return cleaned;
+  }
+  
+  let limpia = cleaned.replace(/^\/+/, "");
   if (!limpia.startsWith("pictogramas/")) {
     limpia = `pictogramas/${limpia}`;
   }
@@ -106,7 +98,7 @@ const obtenerUrlImagen = (ruta?: string) => {
 
 function PictoCard({ picto, onPress, onDelete, medidas, modoEdicion }: any) {
   const { fondo, inner, icono } = colorDe(picto.id);
-  const imgUrl = obtenerUrlImagen(picto.pictos[0]);
+  const imgUrl = obtenerUrlImagen(picto);
   const { cardW, cardH, innerDim, fontSize, fallbackSize } = medidas;
 
   if (picto.isAddButton) {
@@ -148,7 +140,7 @@ function PhraseBar({ frase, onBorrar, onLimpiar, onHablar }: any) {
         ) : (
           frase.map((p: any, i: number) => {
             const { fondo, inner } = colorDe(p.id);
-            const imgUrl = obtenerUrlImagen(p.pictos[0]);
+            const imgUrl = obtenerUrlImagen(p);
 
             return (
               <View key={i} style={[s.phraseChip, { backgroundColor: inner, borderColor: fondo }]}>
@@ -193,8 +185,6 @@ export default function Dashboard() {
   const [perfilTamanoIconos, setPerfilTamanoIconos] = useState('mediano');
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
   const [mensajePerfil, setMensajePerfil] = useState({ texto: '', error: false });
-
-  const [modoContinuarFrase, setModoContinuarFrase] = useState(true);
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
@@ -265,14 +255,11 @@ export default function Dashboard() {
       if (Array.isArray(data) && data.length > 0) {
         setPictos(data);
       } else {
-        setPictos([
-          VOLVER_INICIO,
-          CONTINUAR_FRASE
-        ]);
+        setPictos([]);
       }
     } catch (error) {
       console.error(error);
-      setPictos([VOLVER_INICIO]);
+      setPictos([]);
     } finally {
       setCargando(false);
     }
@@ -303,18 +290,15 @@ export default function Dashboard() {
     setGuardandoForm(true);
     
     try {
-      // 1. Preparamos los datos incluyendo la imagen
       const formData = new FormData();
       formData.append('nuevaPalabra', formPalabra.trim());
       
       if (formImagenUri) {
         if (Platform.OS === 'web') {
-          // LÓGICA PARA LA WEB (PC)
           const responseFile = await fetch(formImagenUri);
           const blob = await responseFile.blob();
           formData.append('imagen', blob, 'pictograma.png');
         } else {
-          // LÓGICA PARA CELULARES (Android / iOS)
           const filename = formImagenUri.split('/').pop() || 'pictograma.png';
           formData.append('imagen', {
             uri: formImagenUri,
@@ -328,7 +312,6 @@ export default function Dashboard() {
         formData.append('anteriorId', String(frase[frase.length - 1].id));
       }
 
-      // 2. Enviamos a la API de Neo4j
       const responseNeo = await fetch(
        `${NEO4J_API}/agregar`,
        {
@@ -340,9 +323,8 @@ export default function Dashboard() {
       if (!responseNeo.ok) throw new Error('Error al guardar el pictograma en la base de datos central');
       
       const dataNeo = await responseNeo.json();
-      const nuevoId = dataNeo.nodo.id; // Extraemos el ID que nos devolvió Neo4j
+      const nuevoId = dataNeo.nodo.id;
 
-      // 3. Si es un nodo NUEVO (no una edición), le avisamos a MongoDB
       const responseRedis = await fetch(
         `${REDIS_API}/sesion/${auth.current.uid}/personalizados`,
         {
@@ -361,7 +343,6 @@ export default function Dashboard() {
         throw new Error('El pictograma se guardó, pero no se pudo vincular a tu perfil');
       }
 
-      // 4. Todo salió bien, cerramos el modal y refrescamos
       setModalVisible(false);
       await refrescarVistaActual();
       
@@ -376,7 +357,6 @@ export default function Dashboard() {
   const handleEliminarNodo = async (idNodo: string | number) => {
     try {
       const { uid, token } = auth.current;
-      console.log("ELIMINANDO", idNodo);
       setCargando(true);
 
       const response = await fetch(
@@ -393,10 +373,6 @@ export default function Dashboard() {
         }
       );
 
-      const data = await response.json();
-      console.log("status:", response.status);
-      console.log("respuesta:", data);
-
       await refrescarVistaActual();
     } catch (err) {
       console.error("ERROR ELIMINANDO:", err);
@@ -405,24 +381,51 @@ export default function Dashboard() {
     }
   };
 
-  // ── Lógica de Interacción ──
-  const handleTap = useCallback(async (picto: Picto) => {
-    // Corregido: "Continuar frase" recarga el nivel raíz de categorías sin borrar la frase superior
-    if (picto.isContinue || picto.id === 'continue') {
-      await cargarPadres();
-      return;
-    }
+  // ── Conectividad Avanzada con Cassandra y Neo4j (Dashboard 2) ───────────────────
+  const handleEnviarFrase = useCallback(async () => {
+    if (frase.length === 0) return;
+    try {
+      const { token } = auth.current;
+      const payload = parseJwt(token || '');
+      const usuarioId = String(payload.username ?? 'Usuario');
+      const secuencia = frase.map(p => p.id);
+      
+      // Estructura temporal/secuencia para Cassandra
+      const payloadInteraccion = {
+        usuario_id: usuarioId,
+        secuencia: secuencia,
+        creado_en: new Date().toISOString()
+      };
 
-    // "Volver al inicio" borra todo el progreso acumulado y recarga el nivel raíz
-    if (picto.isHome || picto.id === 'home') {
+      // 1. Persistencia en Cassandra
+      await fetch(`${CASSANDRA_API}/interacciones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadInteraccion),
+      });
+
+      // 2. Refuerzo probabilístico/pesos en Neo4j
+      if (secuencia.length >= 2) {
+        await fetch(`${NEO4J_API}/reforzar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secuencia }),
+        }).catch(e => console.warn('Error reforzando relaciones Neo4j:', e));
+      }
+
+    } catch (e) {
+      console.warn('Error guardando interacción en Cassandra:', e);
+    } finally {
       setFrase([]);
       await cargarPadres();
-      return;
     }
+  }, [frase]);
 
+  // ── Lógica de Interacción Base ──
+  const handleTap = useCallback(async (picto: Picto) => {
     setFrase(prev => [...prev, picto]);
     await cargarSiguientes(picto);
-  }, [frase]);
+  }, []);
 
   const handleBorrar = useCallback(async () => {
     if (frase.length === 0) return;
@@ -444,7 +447,7 @@ export default function Dashboard() {
     await AsyncStorage.removeItem('tokenUsuario'); router.replace('/');
   }, []);
 
-  // ── Lógica de Perfil (Nuevo Modal) ──
+  // ── Lógica de Perfil ──
   const abrirModalPerfil = () => {
     setPerfilColorFondo(colorFondo);
     setPerfilTamanoIconos(tamanoIconos);
@@ -466,12 +469,11 @@ export default function Dashboard() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.mensaje || "Error al actualizar");
 
-      // Actualizamos estado local del Dashboard para verlo al instante
       setColorFondo(perfilColorFondo);
       setTamanoIconos(perfilTamanoIconos);
       
       setMensajePerfil({ texto: 'Configuración guardada!', error: false });
-      setTimeout(() => setModalPerfilVisible(false), 1500); // Cierra automático después de avisar
+      setTimeout(() => setModalPerfilVisible(false), 1500);
     } catch (err: any) {
       setMensajePerfil({ texto: err.message || "No se pudo conectar", error: true });
     } finally {
@@ -480,56 +482,106 @@ export default function Dashboard() {
   };
 
   const datosFlatList = modoEdicion
-  ? [...pictos, { id: 'add', palabra: 'Agregar', pictos: [], isAddButton: true }]
-  : [...pictos, CONTINUAR_FRASE];
+    ? [...pictos, { id: 'add', palabra: 'Agregar', pictos: [], isAddButton: true }]
+    : pictos;
 
   return (
     <SafeAreaView style={[s.screen, { backgroundColor: colorFondo }]}>
       
-      {/* ── Header ── */}
-      <View style={s.topContainer}>
-        {/* Transformamos la sección de perfil en un botón para abrir el modal */}
-        <TouchableOpacity style={s.profileSection} onPress={abrirModalPerfil} activeOpacity={0.7}>
-          <View style={s.avatar}><Text style={s.avatarLetra}>{nombre.charAt(0).toUpperCase()}</Text></View>
-          <View style={s.textWrapper}>
-            <Text style={s.holaText}>Hola,</Text>
-            <Text style={s.nombreText} numberOfLines={1}>{nombre}</Text>
+      {/* ── SCROLL VERTICAL DE TODA LA PANTALLA ── */}
+      <ScrollView 
+        showsVerticalScrollIndicator={true} 
+        contentContainerStyle={{ flexGrow: 1 }}
+      >
+        {/* Cambiamos flex: 1 por width: '100%' para que la pantalla pueda crecer hacia abajo y scrollear */}
+        <View style={{ width: '100%', paddingVertical: 10 }}>
+          
+          {/* ── Header ── */}
+          <View style={s.topContainer}>
+            <TouchableOpacity style={s.profileSection} onPress={abrirModalPerfil} activeOpacity={0.7}>
+              <View style={s.avatar}><Text style={s.avatarLetra}>{nombre.charAt(0).toUpperCase()}</Text></View>
+              <View style={s.textWrapper}>
+                <Text style={s.holaText}>Hola,</Text>
+                <Text style={s.nombreText} numberOfLines={1}>{nombre}</Text>
+              </View>
+            </TouchableOpacity>
+
+            <PhraseBar frase={frase} onBorrar={handleBorrar} onLimpiar={handleLimpiar} onHablar={handleHablar} />
+
+            <TouchableOpacity onPress={() => setModoEdicion(!modoEdicion)} style={[s.btnHeader, modoEdicion && { backgroundColor: '#DBEAFE' }]} hitSlop={10}>
+              <Text style={s.iconoHeader}>⚙️</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleEnviarFrase} style={s.btnHeader} hitSlop={10}>
+              <Text style={s.iconoHeader}>↪️</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleLogout} style={s.btnHeader} hitSlop={10}>
+              <Text style={s.iconoHeader}>🚪</Text>
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
 
-        <PhraseBar frase={frase} onBorrar={handleBorrar} onLimpiar={handleLimpiar} onHablar={handleHablar} />
+          {/* ── Grilla Principal ── */}
+          <View style={s.gridContainer}>
+            {cargando ? (
+              <View style={s.loading}><ActivityIndicator size="large" color="#7C3AED" /></View>
+            ) : (
+              <View style={{ width: '100%', justifyContent: 'center' }}>
+                
+                {/* Tu FlatList horizontal original INTRACTO sin tocar */}
+                <FlatList
+                  data={datosFlatList}
+                  keyExtractor={item => String(item.id)}
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.scrollHorizontalContainer}
+                  renderItem={({ item }) => (
+                    <PictoCard 
+                      picto={item as Picto} 
+                      onPress={() => item.isAddButton ? abrirModalCrear() : handleTap(item as Picto)} 
+                      onDelete={() => handleEliminarNodo(item.id)}
+                      medidas={medidas}
+                      modoEdicion={modoEdicion && !item.isAddButton}
+                    />
+                  )}
+                />
 
-        <TouchableOpacity onPress={() => setModoEdicion(!modoEdicion)} style={[s.btnHeader, modoEdicion && { backgroundColor: '#DBEAFE' }]} hitSlop={10}>
-          <Text style={s.iconoHeader}>⚙️</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleLogout} style={s.btnHeader} hitSlop={10}>
-          <Text style={s.iconoHeader}>↪</Text>
-        </TouchableOpacity>
-      </View>
+                {/* ── Botones Fijos de Control Inferiores ── */}
+                {!modoEdicion && (
+                  <View style={s.fixedControlsContainer}>
+                    <TouchableOpacity 
+                      style={[s.fixedSquareBtn, { backgroundColor: '#4B5563' }]} 
+                      onPress={handleLimpiar}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.fixedBtnIcon}>🏠</Text>
+                      <Text style={s.fixedBtnText}>Volver al Inicio</Text>
+                    </TouchableOpacity>
 
-      {/* ── Grilla Principal ── */}
-      <View style={s.gridContainer}>
-        {cargando ? (
-          <View style={s.loading}><ActivityIndicator size="large" color="#7C3AED" /></View>
-        ) : (
-          <FlatList
-            data={datosFlatList}
-            keyExtractor={item => String(item.id)}
-            horizontal={true}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.scrollHorizontalContainer}
-            renderItem={({ item }) => (
-              <PictoCard 
-                picto={item as Picto} 
-                onPress={() => item.isAddButton ? abrirModalCrear() : handleTap(item as Picto)} 
-                onDelete={() => handleEliminarNodo(item.id)}
-                medidas={medidas}
-                modoEdicion={modoEdicion && !item.isAddButton}
-              />
+                    <TouchableOpacity 
+                      style={[s.fixedSquareBtn, { backgroundColor: '#059669' }]} 
+                      onPress={async () => { await cargarPadres(); }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.fixedBtnIcon}>🔄</Text>
+                      <Text style={s.fixedBtnText}>Continuar Frase</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                      style={[s.fixedSquareBtn, { backgroundColor: '#7C3AED' }]} 
+                      onPress={handleEnviarFrase}
+                      disabled={frase.length === 0}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.fixedBtnIcon}>✔️</Text>
+                      <Text style={s.fixedBtnText}>Terminar Frase</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             )}
-          />
-        )}
-      </View>
+          </View>
+
+        </View>
+      </ScrollView>
 
       {/* ── Modal de Nodos (Crear/Editar) ── */}
       <Modal visible={modalVisible} animationType="fade" transparent={true}>
@@ -554,7 +606,7 @@ export default function Dashboard() {
         </View>
       </Modal>
 
-      {/* ── Modal de Perfil (NUEVO) ── */}
+      {/* ── Modal de Perfil ── */}
       <Modal visible={modalPerfilVisible} animationType="fade" transparent={true}>
         <View style={s.modalOverlay}>
           <View style={s.modalCardPerfil}>
@@ -614,12 +666,12 @@ export default function Dashboard() {
           </View>
         </View>
       </Modal>
-
+            
     </SafeAreaView>
   );
 }
 
-// ── Estilos ───────────────────────────────────────────────────────────────────
+// ── Estilos Completos ───────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   screen: { flex: 1 },
   topContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)' },
@@ -643,8 +695,8 @@ const s = StyleSheet.create({
   btnIconoBarra: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
   btnTextoBarra: { fontSize: 15 },
   
-  gridContainer: { flex: 1, justifyContent: 'center' },
-  scrollHorizontalContainer: { paddingHorizontal: 16, alignItems: 'center', gap: 14 },
+  gridContainer: { flex: 1, justifyContent: 'center', top: 100, overflowY: "scroll" },
+  scrollHorizontalContainer: { paddingHorizontal: 16, alignItems: 'center', gap: 14, height: '60%' },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
   card: { borderRadius: 18, paddingTop: 10, paddingHorizontal: 8, paddingBottom: 8, alignItems: 'center', justifyContent: 'space-between', elevation: 4 },
@@ -655,6 +707,11 @@ const s = StyleSheet.create({
   cardFallback: { fontWeight: '800', textTransform: 'uppercase' },
   btnEliminarFlotante: { position: 'absolute', top: -10, right: -10, backgroundColor: '#DC2626', width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 5, zIndex: 10 },
   iconoEliminar: { color: 'white', fontSize: 14 },
+
+  fixedControlsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, paddingBottom: 25, paddingTop: 10, width: '100%' },
+  fixedSquareBtn: { width: 150, height: 110, borderRadius: 18, justifyContent: 'center', alignItems: 'center', padding: 12, elevation: 4, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  fixedBtnIcon: { fontSize: 26, marginBottom: 4 },
+  fixedBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', textAlign: 'center' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContenido: { width: 450, backgroundColor: 'white', borderRadius: 20, padding: 24, elevation: 10 },

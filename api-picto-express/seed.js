@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const SALT_ROUNDS = 10;
-const DB_URI = 'mongodb://127.0.0.1:27017/picto_mongodb';
+const DB_URI = 'mongodb+srv://ja646064_db_user:7Lh3NCTTApgDSzA7@cluster0.r6c7til.mongodb.net/picto_mongodb?appName=Cluster0';
 
 // ----- Parsear argumentos de línea de comandos ------------------------------------------------------
 const args = process.argv.slice(2);
@@ -22,18 +22,6 @@ const LIMPIAR  = args.includes('--limpiar');
 const usuarioSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true, trim: true },
     password: { type: String, required: true },
-    rol: { type: String, required: true, enum: ['usuario', 'terapeuta'] },
-    terapeuta: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Usuario',
-        required: function () {
-            return this.rol === 'usuario';
-        }
-    },
-    usuarios: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Usuario'
-    }],
     colorFondo: { type: String, default: '#FFFFFF' },
     tamañoIconos: { type: String, default: 'mediano', enum: ['pequeño', 'mediano', 'grande'] },
     listaEliminados: { type: [Number], default: [] },
@@ -58,28 +46,19 @@ function subarray_aleatorio(arr, max = 4) {
     return copia.slice(0, cantidad);
 }
 
-async function generarUsuario(indice, rol, terapeutaId = null) {
+async function generarUsuario(indice) {
     const username = `usuario_${String(indice).padStart(3, '0')}`;
     const password = `pass_${username}`;
     const passwordHasheada = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const usuario = {
+    return {
         username,
         password: passwordHasheada,
-        rol,
         colorFondo: elemento_aleatorio(COLORES),
         tamañoIconos: elemento_aleatorio(TAMAÑOS),
         listaEliminados: subarray_aleatorio(PICTOGRAMAS_EJEMPLO, 3),
         listaAdmitidosPersonalizados: subarray_aleatorio(PICTOGRAMAS_EJEMPLO, 5)
     };
-
-    if (rol === 'usuario') {
-        usuario.terapeuta = terapeutaId;
-    } else {
-        usuario.usuarios = [];
-    }
-
-    return usuario;
 }
 
 // ----- Main --------------------------------------------------------------------------------------------
@@ -92,49 +71,22 @@ async function main() {
         console.log('🗑️  Colección limpiada\n');
     }
 
-    console.log(`⏳ Generando ${CANTIDAD} registros de usuarios y terapeutas (esto puede tardar por el hash bcrypt)...`);
-
-    const terapeutasCount = Math.max(1, Math.min(2, Math.floor(CANTIDAD / 5) || 1));
-    const usuariosCount = Math.max(0, CANTIDAD - terapeutasCount);
-
-    const terapeutas = [];
-    for (let i = 1; i <= terapeutasCount; i++) {
-        terapeutas.push(await generarUsuario(i, 'terapeuta'));
-        process.stdout.write(`\r   Hasheando terapeutas... ${i}/${terapeutasCount}`);
-    }
-
-    const terapeutasInsertados = await Usuario.insertMany(terapeutas, { ordered: false });
-    const terapeutasIds = terapeutasInsertados.map(t => t._id);
+    console.log(`⏳ Generando ${CANTIDAD} usuarios (esto puede tardar por el hash bcrypt)...`);
 
     const usuarios = [];
-    for (let i = terapeutasCount + 1; i <= terapeutasCount + usuariosCount; i++) {
-        const terapeutaAsignado = elemento_aleatorio(terapeutasIds);
-        usuarios.push(await generarUsuario(i, 'usuario', terapeutaAsignado));
-        process.stdout.write(`\r   Hasheando usuarios... ${i - terapeutasCount}/${usuariosCount}`);
+    for (let i = 1; i <= CANTIDAD; i++) {
+        usuarios.push(await generarUsuario(i));
+        process.stdout.write(`\r   Hasheando contraseñas... ${i}/${CANTIDAD}`);
     }
     console.log('\n');
 
-    let insertados = 0;
     try {
-        const resultadoUsuarios = await Usuario.insertMany(usuarios, { ordered: false });
-        insertados = terapeutasInsertados.length + resultadoUsuarios.length;
-
-        const gruposPorTerapeuta = resultadoUsuarios.reduce((acc, usuarioDoc) => {
-            const id = usuarioDoc.terapeuta.toString();
-            acc[id] = acc[id] || [];
-            acc[id].push(usuarioDoc._id);
-            return acc;
-        }, {});
-
-        for (const [terapeutaId, usuariosIds] of Object.entries(gruposPorTerapeuta)) {
-            await Usuario.findByIdAndUpdate(terapeutaId, { usuarios: usuariosIds });
-        }
-
-        console.log(`✅ ${insertados} usuarios insertados correctamente.`);
+        const resultado = await Usuario.insertMany(usuarios, { ordered: false });
+        console.log(`✅ ${resultado.length} usuarios insertados correctamente.`);
     } catch (error) {
         if (error.code === 11000) {
-            const insertadosParciales = error.result?.nInserted ?? '?';
-            console.warn(`⚠️  Algunos usernames ya existían. Se insertaron ${insertadosParciales} documentos nuevos.`);
+            const insertados = error.result?.nInserted ?? '?';
+            console.warn(`⚠️  Algunos usernames ya existían. Se insertaron ${insertados} usuarios nuevos.`);
         } else {
             console.error('❌ Error al insertar:', error.message);
         }
