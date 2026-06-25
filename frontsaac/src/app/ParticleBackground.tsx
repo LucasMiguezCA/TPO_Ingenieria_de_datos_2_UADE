@@ -35,11 +35,6 @@ export default function ParticleBackground() {
       if (!canvas || !ctx) return;
 
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-      const gradient = ctx.createLinearGradient(0, 0, window.innerWidth, window.innerHeight);
-      gradient.addColorStop(0, 'rgba(4, 12, 26, 0.96)');
-      gradient.addColorStop(1, 'rgba(7, 22, 44, 0.96)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
       particles.forEach((p, index) => {
         p.x += p.vx;
