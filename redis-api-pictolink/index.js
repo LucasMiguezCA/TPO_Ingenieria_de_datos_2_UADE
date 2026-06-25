@@ -152,6 +152,10 @@ async function neo(path, body) {
 
 // Trae las dos listas del usuario desde la API de Mongo (hidratación Mongo -> Redis).
 // Mongo expone GET /api/usuarios/:id con listaEliminados y listaAdmitidosPersonalizados.
+// ANTES:
+// return { eliminados: u.listaEliminados || [], personalizados: u.listaAdmitidosPersonalizados || [] };
+
+// DESPUÉS:
 async function listasDeMongo(usuarioId) {
   const r = await fetch(`${MONGO_API}/api/usuarios/${usuarioId}`, {
     headers: { "X-Service-Key": SERVICE_KEY },
@@ -161,6 +165,8 @@ async function listasDeMongo(usuarioId) {
   return {
     eliminados: u.listaEliminados || [],
     personalizados: u.listaAdmitidosPersonalizados || [],
+    colorFondo: u.colorFondo,
+    tamañoIconos: u.tamañoIconos
   };
 }
 
@@ -207,30 +213,41 @@ app.get("/health", async (req, res) => {
 app.post("/sesion/:usuarioId", async (req, res) => {
   const u = req.params.usuarioId;
   try {
-    let { eliminados, personalizados } = req.body;
+    let { eliminados, personalizados, colorFondo, tamañoIconos } = req.body;
+    
     // Si el body no trae las listas, las buscamos en Mongo.
     if (eliminados === undefined && personalizados === undefined) {
-      ({ eliminados, personalizados } = await listasDeMongo(u));
+      const mongoData = await listasDeMongo(u);
+      eliminados = mongoData.eliminados;
+      personalizados = mongoData.personalizados;
+      colorFondo = mongoData.colorFondo;       // Capturamos el color
+      tamañoIconos = mongoData.tamañoIconos;   // Capturamos el tamaño
     }
     eliminados = eliminados || [];
     personalizados = personalizados || [];
 
- const multi = redis.multi();
+    const multi = redis.multi();
     multi.del(kElim(u));
     multi.del(kPers(u));
     multi.sAdd(kElim(u), eliminados.length ? eliminados.map(String) : ["__init__"]);
     multi.sAdd(kPers(u), personalizados.length ? personalizados.map(String) : ["__init__"]);
     multi.expire(kElim(u), TTL);
     multi.expire(kPers(u), TTL);
-    // FIX: registrar el token (jti) como SESIÓN ACTIVA. Desde acá Redis es la fuente de
-    // verdad: el token vale mientras este jti exista y no expire su TTL.
+    
     if (AUTH_REQUIRED && req.jti) {
       multi.set(kSesionActiva(req.jti), String(u), { EX: TTL });
     }
     await multi.exec();
-    await invalidarCache(u); // sesión nueva: arrancar sin caché viejo
+    await invalidarCache(u);
 
-    res.json({ mensaje: "Sesión iniciada", usuario: u, ...(await leerListas(u)) });
+    // Agregamos el colorFondo y tamañoIconos a la respuesta que va al frontend
+    res.json({ 
+      mensaje: "Sesión iniciada", 
+      usuario: u, 
+      colorFondo, 
+      tamañoIconos, 
+      ...(await leerListas(u)) 
+    });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }

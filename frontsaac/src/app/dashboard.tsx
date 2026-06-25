@@ -104,7 +104,16 @@ function PictoCard({ picto, onPress, onDelete, medidas, modoEdicion }: any) {
   if (picto.isAddButton) {
     return (
       <TouchableOpacity onPress={onPress} style={[s.card, s.cardAdd, { width: cardW, height: cardH }]} activeOpacity={0.82}>
-        <View style={[s.cardInner, s.cardInnerAdd, { width: innerDim, height: innerDim }]}>
+        <View
+          style={[
+            s.cardInner,
+            {
+              backgroundColor: inner,
+              width: '100%',
+              flex: 1
+            }
+          ]}
+        >
           <Text style={[s.cardFallback, { color: '#9CA3AF', fontSize: fallbackSize }]}>+</Text>
         </View>
       </TouchableOpacity>
@@ -120,9 +129,27 @@ function PictoCard({ picto, onPress, onDelete, medidas, modoEdicion }: any) {
       )}
       
       <Text style={[s.cardLabel, { fontSize }]} numberOfLines={1}>{picto.palabra}</Text>
-      <View style={[s.cardInner, { backgroundColor: inner, width: innerDim, height: innerDim }]}>
+      <View
+        style={[
+          s.cardInner,
+          {
+            backgroundColor: inner,
+            flex: 1,
+            width: '100%',
+            marginTop: 8,
+            marginBottom: 8
+          }
+        ]}
+      >
         {imgUrl ? (
-          <Image source={{ uri: imgUrl }} style={{ width: innerDim * 0.75, height: innerDim * 0.75 }} contentFit="contain" />
+          <Image
+            source={{ uri: imgUrl }}
+            style={{
+              width: '95%',
+              height: '95%'
+            }}
+            contentFit="contain"
+          />
         ) : (
           <Text style={[s.cardFallback, { color: icono, fontSize: fallbackSize }]}>{picto.palabra.slice(0, 3)}</Text>
         )}
@@ -493,7 +520,6 @@ export default function Dashboard() {
         showsVerticalScrollIndicator={true} 
         contentContainerStyle={{ flexGrow: 1 }}
       >
-        {/* Cambiamos flex: 1 por width: '100%' para que la pantalla pueda crecer hacia abajo y scrollear */}
         <View style={{ width: '100%', paddingVertical: 10 }}>
           
           {/* ── Header ── */}
@@ -526,7 +552,6 @@ export default function Dashboard() {
             ) : (
               <View style={{ width: '100%', justifyContent: 'center' }}>
                 
-                {/* Tu FlatList horizontal original INTRACTO sin tocar */}
                 <FlatList
                   data={datosFlatList}
                   keyExtractor={item => String(item.id)}
@@ -695,20 +720,39 @@ const s = StyleSheet.create({
   btnIconoBarra: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
   btnTextoBarra: { fontSize: 15 },
   
-  gridContainer: { flex: 1, justifyContent: 'center', top: 100, overflowY: "scroll" },
-  scrollHorizontalContainer: { paddingHorizontal: 16, alignItems: 'center', gap: 14, height: '60%' },
+  // ACA FUE EL AJUSTE PRINCIPAL: Se sacó top y overflowY, se usó paddingTop
+  gridContainer: { flex: 1, justifyContent: 'center', paddingTop: 20 },
+  
+  // ACA FUE EL OTRO AJUSTE: Se sacó height: '60%' para liberar a las tarjetas
+  scrollHorizontalContainer: { paddingHorizontal: 16, alignItems: 'center', gap: 14, paddingVertical: 20 },
+  
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
-  card: { borderRadius: 18, paddingTop: 10, paddingHorizontal: 8, paddingBottom: 8, alignItems: 'center', justifyContent: 'space-between', elevation: 4 },
+  card: {
+  borderRadius: 18,
+  paddingTop: 10,
+  paddingHorizontal: 8,
+  paddingBottom: 8,
+  alignItems: 'center',
+  elevation: 4
+},
   cardAdd: { backgroundColor: '#F3F4F6', borderWidth: 3, borderColor: '#D1D5DB', borderStyle: 'dashed', elevation: 0, justifyContent: 'center' },
   cardInnerAdd: { backgroundColor: 'transparent' },
   cardLabel: { color: '#FFFFFF', fontWeight: '800', textAlign: 'center', width: '100%' },
-  cardInner: { borderRadius: 12, justifyContent: 'center', alignItems: 'center', width: '100%' },
+  cardInner: {
+  borderRadius: 12,
+  justifyContent: 'center',
+  alignItems: 'center',
+  flex: 1,
+  width: '100%',
+},
   cardFallback: { fontWeight: '800', textTransform: 'uppercase' },
   btnEliminarFlotante: { position: 'absolute', top: -10, right: -10, backgroundColor: '#DC2626', width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 5, zIndex: 10 },
   iconoEliminar: { color: 'white', fontSize: 14 },
 
-  fixedControlsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, paddingBottom: 25, paddingTop: 10, width: '100%' },
+  // ACA SE SUMO PADDING BOTTOM para que los botones no se peguen al final del ScrollView
+  fixedControlsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24, paddingBottom: 40, paddingTop: 20, width: '100%' },
+  
   fixedSquareBtn: { width: 150, height: 110, borderRadius: 18, justifyContent: 'center', alignItems: 'center', padding: 12, elevation: 4, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   fixedBtnIcon: { fontSize: 26, marginBottom: 4 },
   fixedBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', textAlign: 'center' },
@@ -731,7 +775,7 @@ const s = StyleSheet.create({
   modalTitulo: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: '#111827', textAlign: 'center' },
   label: { fontSize: 14, fontWeight: '600', color: '#4B5563', marginBottom: 6, marginTop: 12 },
   input: { backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, color: '#111827' },
-  btnImagenSelector: { width: '100%', height: 120, backgroundColor: '#F3F4F6', borderRadius: 10, borderStyle: 'dashed', borderWidth: 2, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  btnImagenSelector: { width: '100%', height: 120, backgroundColor: '#F3F4F6', borderRadius: 10, borderStyle: 'dashed', borderWidth: 2, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center', overflow: 'visible' },
   modalBotonesContainer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 24 },
   btnAccion: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, minWidth: 100, alignItems: 'center', justifyContent: 'center' },
   textoBtnAccion: { fontWeight: 'bold', fontSize: 16 }

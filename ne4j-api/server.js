@@ -118,8 +118,14 @@ app.post("/siguientes", async (req, res) => {
 });
 
 // Agregar pictograma con imagen desde Cloudinary
-app.post("/agregar", async (req, res) => {
-  const { anteriorId, nuevaPalabra, imagenUrl } = req.body;
+// Agregar pictograma con imagen desde Cloudinary (soportando FormData)
+app.post("/agregar", upload.single("imagen"), async (req, res) => {
+  // Ahora req.body tiene los campos de texto gracias a multer
+  const { anteriorId, nuevaPalabra } = req.body;
+  
+  // req.file tiene la información de la imagen subida a Cloudinary
+  const imagenUrl = req.file ? req.file.path : null;
+
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
     const result = await session.run(
@@ -133,13 +139,26 @@ app.post("/agregar", async (req, res) => {
          nodoPadre: true
        })
        RETURN nuevo`,
-      { palabra: nuevaPalabra, imagenUrl: imagenUrl || null }
+      { palabra: nuevaPalabra, imagenUrl: imagenUrl }
     );
+    
     const nuevo = result.records[0].get("nuevo").properties;
+    
+    // Si quisieras conectarlo con el anteriorId (opcional, según tu lógica de grafo)
+    if (anteriorId) {
+      await session.run(
+        `MATCH (a:Palabra {id: toInteger($anteriorId)}), (b:Palabra {id: toInteger($nuevoId)})
+         MERGE (a)-[r:CONECTA_CON]->(b)
+         ON CREATE SET r.peso = 1
+         ON MATCH SET r.peso = r.peso + 1`,
+        { anteriorId, nuevoId: nuevo.id }
+      );
+    }
+
     res.json({ mensaje: "Nodo creado", nodo: nuevo });
   } catch (e) {
     console.error(e);
-    res.status(500).send("Error");
+    res.status(500).send("Error al crear el nodo");
   } finally {
     await session.close();
   }
