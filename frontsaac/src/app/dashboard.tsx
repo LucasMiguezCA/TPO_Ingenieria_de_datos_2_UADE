@@ -47,10 +47,14 @@ const colorDe = (id: number) => PALETA[id % PALETA.length];
 
 const OBTENER_MEDIDAS = (tamaño: string) => {
   switch (tamaño) {
-    case 'chico': return { cardW: 400, cardH: 380, innerDim: 330, fontSize: 23, fallbackSize: 100 };
-    case 'grande': return { cardW: 650, cardH: 580, innerDim: 530, fontSize: 27, fallbackSize: 140 };
+    case 'pequeño':
+    case 'chico':
+      return { cardW: 160, cardH: 160, innerDim: 120, fontSize: 14, fallbackSize: 60 };
+    case 'grande':
+      return { cardW: 320, cardH: 320, innerDim: 260, fontSize: 22, fallbackSize: 120 };
     case 'mediano':
-    default: return { cardW: 550, cardH: 480, innerDim: 430, fontSize: 25, fallbackSize: 100 };
+    default:
+      return { cardW: 220, cardH: 220, innerDim: 170, fontSize: 17, fallbackSize: 80 };
   }
 };
 
@@ -107,17 +111,10 @@ function emojiParaPalabra(palabra: string) {
 function PictoCard({ picto, onPress, onDelete, showDelete, medidas, layoutWidth, numCols }: { picto: Picto, onPress: () => void, onDelete: () => void, showDelete: boolean, medidas: ReturnType<typeof OBTENER_MEDIDAS>, layoutWidth: number, numCols: number }) {
   const { fondo, inner, icono } = colorDe(picto.id);
   const imgUrl = obtenerUrlPictograma(picto);
-  const { innerDim, fallbackSize } = medidas;
-  const margin = 16;
-  const minCardW = 180;
-  const maxCardW = layoutWidth < 640 ? 200 : layoutWidth < 1280 ? 240 : 280;
-  const available = Math.max(minCardW * numCols, layoutWidth - margin * (numCols + 1));
-  const cardW = Math.max(minCardW, Math.min(maxCardW, available / numCols));
-  const cardH = cardW * 0.92;
+  const { cardW, cardH, innerDim, fallbackSize, fontSize } = medidas;
   const cardInnerHeight = cardH * 0.75;
-  const innerSize = Math.min(innerDim, cardW - 36);
-  const imageSize = Math.min(innerSize * 0.9, 220);
-
+  const innerSize = innerDim;
+  const imageSize = Math.min(innerSize * 0.9, cardW - 20);
   const hasImage = Boolean(imgUrl);
   const emoji = emojiParaPalabra(picto.palabra);
 
@@ -596,13 +593,16 @@ await cargarPadres(pers, elim);
           <View style={s.loading}><ActivityIndicator size="large" color="#7C3AED" /></View>
         ) : (
           <FlatList
-            key={`flatlist-${numCols}`}
             data={pictos}
             keyExtractor={item => String(item.id)}
-            numColumns={numCols}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={s.scrollHorizontalContainer}
-            columnWrapperStyle={numCols > 1 ? s.columnWrapper : undefined}
+            horizontal={true}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{
+              paddingHorizontal: 16,
+              paddingVertical: 20,
+              alignItems: 'center',
+              gap: 20,
+            }}
             renderItem={({ item }) => (
               <PictoCard
                 picto={item}
@@ -611,7 +611,7 @@ await cargarPadres(pers, elim);
                 showDelete={deleteMode}
                 medidas={medidas}
                 layoutWidth={layout.width}
-                numCols={numCols}
+                numCols={1}
               />
             )}
           />
