@@ -156,11 +156,13 @@ const register = () => {
 );
 }
 const colores = [
-  "#1F2937", // gris oscuro
-  "#374151", // gris medio
-  "#6B7280", // gris claro
-  "#FFFFFF", // blanco
-  "#000000", // negro
+  "#FFFFFF",  // Blanco
+  "#FFF9C4",  // Amarillo suave
+  "#E3F2FD",  // Azul suave
+  "#F3E5F5",  // Violeta suave
+  "#E8F5E9",  // Verde suave
+  "#FFE0B2",  // Naranja suave
+  "#FCE4EC",  // Rosa suave
 ];
 const styles = StyleSheet.create({
   container: {
