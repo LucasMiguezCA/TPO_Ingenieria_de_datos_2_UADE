@@ -776,7 +776,7 @@ export default function Dashboard() {
 // ── Estilos (Mantenidos igual para el layout Landscape) ───────────────────────
 const s = StyleSheet.create({
   screen: { flex: 1 },
-  topContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 16, borderBottomWidth: 1.5, borderBottomColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(255,255,255,0.02)' },
+  topContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 16, borderBottomWidth: 1.5, borderBottomColor: 'rgba(0,0,0,0.15)', backgroundColor: 'rgba(0,0,0,0.12)' },
   profileSection: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 160 },
   textWrapper: { flexShrink: 1 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#4fc3f7', justifyContent: 'center', alignItems: 'center', shadowColor: '#4fc3f7', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
