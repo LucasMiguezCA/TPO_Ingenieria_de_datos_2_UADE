@@ -22,6 +22,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import ParticleBackground from './ParticleBackground';
 
 // ── RUTAS DIRECTAS A TUS APIs (Ajustá el localhost por tu IP si usás celular físico)
+const MONGO_API = 'http://localhost:3000';
 const REDIS_API = 'http://localhost:4000';
 const NEO4J_API = 'http://localhost:4001';
 const CASSANDRA_API = 'http://localhost:8000';
@@ -44,6 +45,11 @@ const PALETA = [
 ] as const;
 
 const colorDe = (id: number) => PALETA[id % PALETA.length];
+
+const esFondoClaro = (color: string) => {
+  const claros = ['#FFFFFF','#FFF9C4','#E3F2FD','#F3E5F5','#E8F5E9','#FFE0B2','#FCE4EC'];
+  return claros.includes(color);
+};
 
 const OBTENER_MEDIDAS = (tamaño: string) => {
   switch (tamaño) {
@@ -224,7 +230,7 @@ export default function Dashboard() {
     }
   }, [layout.width]);
 
-  // 2. Extraer Token, Consultar REDIS (Sesión) y Consultar NEO4J (Grafo)
+  // 2. Extraer Token, Consultar MONGODB (Config), REDIS (Sesión) y NEO4J (Grafo)
   useEffect(() => {
     (async () => {
       const tok = await AsyncStorage.getItem('tokenUsuario');
@@ -235,7 +241,21 @@ export default function Dashboard() {
       const uid = String(payload.userId ?? '');
       setNombre(String(payload.username ?? 'Usuario'));
 
-      // --- SOLO REDIS: OBTENER COLOR Y TAMAÑO ---
+      // --- PRIMERO MONGODB: OBTENER COLOR Y TAMAÑO DE LA CONFIG DEL USUARIO ---
+      try {
+        const resMongo = await fetch(`${MONGO_API}/api/usuarios/${uid}`, {
+          headers: { 'x-service-key': 'dev-service-pictolink' }
+        });
+        const dataMongo = await resMongo.json();
+        const tamañoDeDB = dataMongo.tamañoIconos || dataMongo.tamanoIconos || 'mediano';
+        if (dataMongo.colorFondo) setColorFondo(dataMongo.colorFondo);
+        if (tamañoDeDB) setTamanoIconos(tamañoDeDB);
+        console.log('Config desde MongoDB:', { colorFondo: dataMongo.colorFondo, tamañoIconos: tamañoDeDB });
+      } catch (err) {
+        console.warn('No se pudo cargar config desde MongoDB:', err);
+      }
+
+      // --- LUEGO REDIS: OBTENER LISTAS DE USUARIO ---
       try {
         const resRedis = await fetch(`${REDIS_API}/sesion/${uid}`, {
           method: 'POST',
@@ -245,23 +265,17 @@ export default function Dashboard() {
 
         console.log(dataRedis)
         
-        if (dataRedis.colorFondo) setColorFondo(dataRedis.colorFondo);
-if (dataRedis.tamañoIconos) setTamanoIconos(dataRedis.tamañoIconos);
+        const pers = dataRedis.personalizados || [];
+        const elim = dataRedis.eliminados || [];
 
-const pers = dataRedis.personalizados || [];
-const elim = dataRedis.eliminados || [];
+        setPersonalizados(pers);
+        setEliminados(elim);
 
-setPersonalizados(pers);
-setEliminados(elim);
-
-await cargarPadres(pers, elim);
+        await cargarPadres(pers, elim);
         console.log(dataRedis)
       } catch (err) {
         console.warn('No se pudo cargar la sesión de Redis:', err);
       }
-
-      // --- SOLO NEO4J: CARGAR PADRES ---
-      
     })();
   }, []);
 
@@ -569,8 +583,8 @@ await cargarPadres(pers, elim);
           <Text style={s.avatarLetra}>{nombre.charAt(0).toUpperCase()}</Text>
         </TouchableOpacity>
         <View style={s.textWrapper}>
-          <Text style={s.holaText}>Hola,</Text>
-          <Text style={s.nombreText} numberOfLines={1}>{nombre}</Text>
+          <Text style={[s.holaText, esFondoClaro(colorFondo) && { color: 'rgba(0,0,0,0.5)' }]}>Hola,</Text>
+          <Text style={[s.nombreText, esFondoClaro(colorFondo) && { color: '#1E293B' }]} numberOfLines={1}>{nombre}</Text>
         </View>
         <PhraseBar frase={frase} onBorrar={handleBorrar} onLimpiar={handleLimpiar} />
         <TouchableOpacity onPress={handleEnviarFrase} style={s.logoutBtn} hitSlop={10}><Text style={s.logoutIcon}>↪</Text></TouchableOpacity>
