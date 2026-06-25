@@ -122,13 +122,17 @@ app.post("/siguientes", async (req, res) => {
 
 // Agregar pictograma con imagen desde Cloudinary
 app.post("/agregar", async (req, res) => {
-  const { anteriorId, nuevaPalabra, imagenUrl, nodoPadre } = req.body;
+  const { anteriorId, nuevaPalabra, imagenUrl, nodoPadre, esGlobal } = req.body;
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
     const maxResult = await session.run(
       `MATCH (n:Palabra) RETURN coalesce(max(n.id), 0) + 1 AS nuevoId`
     );
     const nuevoId = maxResult.records[0].get("nuevoId");
+
+    // Si esGlobal es true, crear como nodo original visible para todos
+    const nodoPersonalizadoFinal = esGlobal ? false : true;
+    const nodoPadreFinal = esGlobal ? true : (anteriorId === null);
 
     if (anteriorId !== null && anteriorId !== undefined) {
       const result = await session.run(
@@ -137,12 +141,12 @@ app.post("/agregar", async (req, res) => {
            id: $nuevoId,
            palabra: $palabra,
            imagenUrl: $imagenUrl,
-           nodoPersonalizado: true,
+           nodoPersonalizado: $nodoPersonalizado,
            nodoPadre: false
          })
          CREATE (anterior)-[:CONECTA_CON {peso: 1}]->(nuevo)
          RETURN nuevo`,
-        { anteriorId, nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null }
+        { anteriorId, nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null, nodoPersonalizado: nodoPersonalizadoFinal }
       );
       const nuevo = result.records[0].get("nuevo").properties;
       res.json({ mensaje: "Nodo creado y conectado", nodo: nuevo });
@@ -152,14 +156,14 @@ app.post("/agregar", async (req, res) => {
            id: $nuevoId,
            palabra: $palabra,
            imagenUrl: $imagenUrl,
-           nodoPersonalizado: true,
-           nodoPadre: true
+           nodoPersonalizado: $nodoPersonalizado,
+           nodoPadre: $nodoPadre
          })
          RETURN nuevo`,
-        { nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null }
+        { nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null, nodoPersonalizado: nodoPersonalizadoFinal, nodoPadre: nodoPadreFinal }
       );
       const nuevo = result.records[0].get("nuevo").properties;
-      res.json({ mensaje: "Nodo padre creado", nodo: nuevo });
+      res.json({ mensaje: "Nodo creado", nodo: nuevo });
     }
   } catch (e) {
     console.error("Error en /agregar:", e);
@@ -221,16 +225,29 @@ app.post("/reforzar", async (req, res) => {
 });
 
 app.post("/eliminar", async (req, res) => {
-  console.log("ENDPOINT /eliminar CALLED with id:", req.body.id);
   const id = Number(req.body.id);
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
-    const result = await session.run(
-      `MATCH (p:Palabra {id: $id}) DETACH DELETE p RETURN count(p) AS eliminados`,
+    const check = await session.run(
+      `MATCH (p:Palabra {id: $id}) RETURN p.nodoPersonalizado AS esPersonalizado`,
       { id }
     );
-    const eliminados = result.records[0]?.get('eliminados') ?? 0;
-    res.json({ mensaje: "Nodo eliminado", eliminados });
+
+    if (!check.records.length) {
+      return res.status(404).json({ error: "Pictograma no encontrado" });
+    }
+
+    const esPersonalizado = check.records[0].get('esPersonalizado');
+
+    if (esPersonalizado === true) {
+      await session.run(
+        `MATCH (p:Palabra {id: $id}) DETACH DELETE p`,
+        { id }
+      );
+      return res.json({ mensaje: "Nodo personalizado eliminado", borradoDeNeo: true });
+    }
+
+    return res.json({ mensaje: "Pictograma original, agregar a eliminados del usuario", borradoDeNeo: false });
   } catch (e) {
     console.error("Error eliminando:", e);
     res.status(500).json({ error: e.message });

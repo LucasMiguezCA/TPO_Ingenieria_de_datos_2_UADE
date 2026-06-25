@@ -322,6 +322,7 @@ await cargarPadres(pers, elim);
   const [modalVisible, setModalVisible] = useState(false);
   const [nuevoPictoPalabra, setNuevoPictoPalabra] = useState('');
   const [imagenLocal, setImagenLocal] = useState<string | null>(null);
+  const [esGlobal, setEsGlobal] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
 
   const handleTap = useCallback(async (picto: Picto) => {
@@ -389,6 +390,7 @@ await cargarPadres(pers, elim);
       const anteriorId = fraseActual.length > 0 ? fraseActual[fraseActual.length - 1].id : null;
       console.log('fraseRef al crear:', fraseActual);
       console.log('anteriorId:', anteriorId);
+      console.log('Creando pictograma con esGlobal:', esGlobal);
 
       const res = await fetch(`${NEO4J_API}/agregar`, {
         method: 'POST',
@@ -396,8 +398,9 @@ await cargarPadres(pers, elim);
         body: JSON.stringify({
           nuevaPalabra: nuevoPictoPalabra,
           imagenUrl,
-          anteriorId,
-          nodoPadre: anteriorId === null,
+          anteriorId: esGlobal ? null : anteriorId,
+          nodoPadre: esGlobal ? true : anteriorId === null,
+          esGlobal,
         }),
       });
 
@@ -407,46 +410,48 @@ await cargarPadres(pers, elim);
       // 1. Obtener ID del nodo recién creado
       const nuevoId = data.nodo?.id;
 
-      // 2. Registrar en Redis como personalizado
+      console.log('esGlobal al crear:', esGlobal);
+
       if (nuevoId !== undefined && nuevoId !== null) {
-        try {
-          const tok = await AsyncStorage.getItem('tokenUsuario');
-          const payload = parseJwt(tok || '');
-          const uid = String(payload.userId ?? '');
-
-          await fetch(`${REDIS_API}/sesion/${uid}/personalizados`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` },
-            body: JSON.stringify({ pictogramaId: nuevoId }),
-          });
-        } catch (e) {
-          console.warn('No se pudo registrar el pictograma en Redis', e);
-        }
-
-        // 3. Actualizar estado local y seguir en la rama actual
-        const nuevaListaPersonalizados = [...personalizados, nuevoId];
-        setPersonalizados(nuevaListaPersonalizados);
-
-        if (anteriorId !== null) {
-          // Quedarse en la rama actual mostrando siguientes del nodo anterior.
-          // Como el nodo nuevo no tiene hijos todavía, mostrar los del nodo anterior.
-          await cargarSiguientes({ 
-            id: anteriorId, 
-            palabra: fraseActual[fraseActual.length - 1].palabra,
-            pictos: [] 
-          }, nuevaListaPersonalizados);
+        if (esGlobal === true) {
+          // Es global — NO agregar a Redis, recargar padres directamente
+          setModalVisible(false);
+          setNuevoPictoPalabra('');
+          setImagenLocal(null);
+          setEsGlobal(false);
+          await cargarPadres();
         } else {
-          // Es nodo padre, volver a la pantalla inicial
+          // Es personalizado — agregar a Redis
+          const nuevaListaPersonalizados = [...personalizados, nuevoId];
+          setPersonalizados(nuevaListaPersonalizados);
+
+          try {
+            const tok2 = await AsyncStorage.getItem('tokenUsuario');
+            const payload2 = parseJwt(tok2 || '');
+            const uid2 = String(payload2.userId ?? '');
+            await fetch(`${REDIS_API}/sesion/${uid2}/personalizados`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok2}` },
+              body: JSON.stringify({ pictogramaId: Number(nuevoId) }),
+            });
+          } catch (e) {
+            console.warn('No se pudo registrar en Redis', e);
+          }
+
+          setModalVisible(false);
+          setNuevoPictoPalabra('');
+          setImagenLocal(null);
+          setEsGlobal(false);
           await cargarPadres(nuevaListaPersonalizados, eliminados);
         }
       } else {
         // Si no hay ID, simplemente recargar
+        setModalVisible(false);
+        setNuevoPictoPalabra('');
+        setImagenLocal(null);
+        setEsGlobal(false);
         await cargarPadres();
       }
-
-      setModalVisible(false);
-      setNuevoPictoPalabra('');
-      setImagenLocal(null);
     } catch (e) {
       console.warn('Error creando picto', e);
     }
@@ -475,41 +480,47 @@ await cargarPadres(pers, elim);
   const borrarPicto = useCallback(async () => {
     if (!pictoToDelete) return;
     try {
+      const tok = await AsyncStorage.getItem('tokenUsuario');
+      const payload = parseJwt(tok || '');
+      const uid = String(payload.userId ?? '');
+
       const res = await fetch(`${NEO4J_API}/eliminar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: pictoToDelete.id }),
       });
       if (!res.ok) throw new Error('No se pudo eliminar el pictograma');
-      
+      const resData = await res.json();
+      console.log('borrarPicto response:', resData);
+
       // Quitar del estado local inmediatamente
       setPictos(prev => prev.filter(p => p.id !== pictoToDelete.id));
-      
-      // Si era personalizado, quitarlo de la lista local
-      const nuevosPersonalizados = personalizados.filter(id => id !== pictoToDelete.id);
-      setPersonalizados(nuevosPersonalizados);
-      
-      // Quitarlo de Redis también
-      try {
-        const tok = await AsyncStorage.getItem('tokenUsuario');
-        const payload = parseJwt(tok || '');
-        const uid = String(payload.userId ?? '');
+
+      if (resData.borradoDeNeo === true) {
+        // Era personalizado — quitar de personalizados en Redis
+        const nuevosPersonalizados = personalizados.filter(id => id !== pictoToDelete.id);
+        setPersonalizados(nuevosPersonalizados);
         await fetch(`${REDIS_API}/sesion/${uid}/personalizados/${pictoToDelete.id}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${tok}` }
-        });
-      } catch (e) {
-        console.warn('Error quitando de Redis:', e);
+        }).catch(e => console.warn('Error quitando de personalizados en Redis:', e));
+
+      } else {
+        // Era original — agregar a eliminados en Redis (write-behind a MongoDB automático)
+        const nuevosEliminados = [...eliminados, pictoToDelete.id];
+        setEliminados(nuevosEliminados);
+        await fetch(`${REDIS_API}/sesion/${uid}/eliminados`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` },
+          body: JSON.stringify({ pictoId: String(pictoToDelete.id) }),
+        }).catch(e => console.warn('Error agregando a eliminados en Redis:', e));
       }
-      
-      // Agregar también el ID eliminado a la lista de eliminados para que no reaparezca
-      const nuevosEliminados = [...eliminados, pictoToDelete.id];
-      
+
       setDeleteModalVisible(false);
       setPictoToDelete(null);
-      
-      // Recargar padres con la lista actualizada de personalizados y eliminados
-      await cargarPadres(nuevosPersonalizados, nuevosEliminados);
+
+      await cargarPadres();
+
     } catch (e) {
       console.warn('Error eliminando picto', e);
       setDeleteModalVisible(false);
@@ -635,6 +646,25 @@ await cargarPadres(pers, elim);
               style={s.input}
             />
 
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}
+              onPress={() => setEsGlobal(prev => !prev)}
+              activeOpacity={0.8}
+            >
+              <View style={{
+                width: 22, height: 22, borderRadius: 6,
+                backgroundColor: esGlobal ? '#7C3AED' : 'rgba(255,255,255,0.05)',
+                borderWidth: 1.5,
+                borderColor: esGlobal ? '#7C3AED' : 'rgba(255,255,255,0.2)',
+                alignItems: 'center', justifyContent: 'center'
+              }}>
+                {esGlobal && <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>✓</Text>}
+              </View>
+              <Text style={{ color: 'rgba(226,232,240,0.8)', fontSize: 13 }}>
+                Disponible para todos los alumnos
+              </Text>
+            </TouchableOpacity>
+
             <View style={{ marginTop: 8, marginBottom: 16 }}>
               <TouchableOpacity style={s.dialogActionButton} onPress={elegirImagen} activeOpacity={0.8}>
                 <Text style={s.dialogActionButtonText}>Elegir imagen</Text>
@@ -649,7 +679,7 @@ await cargarPadres(pers, elim);
             <View style={s.dialogActions}>
               <TouchableOpacity
                 style={[s.dialogBtn, s.dialogBtnSecondary]}
-                onPress={() => { setModalVisible(false); setImagenLocal(null); setNuevoPictoPalabra(''); }}
+                onPress={() => { setModalVisible(false); setImagenLocal(null); setNuevoPictoPalabra(''); setEsGlobal(false); }}
                 activeOpacity={0.8}
               >
                 <Text style={[s.dialogBtnText, s.dialogBtnSecondaryText]}>Cancelar</Text>
