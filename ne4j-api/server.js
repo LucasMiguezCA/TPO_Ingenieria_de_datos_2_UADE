@@ -5,7 +5,7 @@ const cors = require("cors");
 const path = require("path");
 const multer = require("multer");
 const { v2: cloudinary } = require("cloudinary");
-const streamifier = require("streamifier");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -19,8 +19,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer en memoria; subimos a Cloudinary usando upload_stream + streamifier
-const upload = multer({ storage: multer.memoryStorage() });
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: { folder: "pictocomm", allowed_formats: ["jpg", "png", "gif", "webp"] },
+});
+const upload = multer({ storage });
 
 // Neo4j connection
 const driver = neo4j.driver(
@@ -43,17 +46,10 @@ app.get("/health", async (req, res) => {
 app.post("/upload", upload.single("imagen"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ mensaje: "No se recibió imagen" });
-    const resultado = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream({ folder: "pictocomm" }, (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      });
-      streamifier.createReadStream(req.file.buffer).pipe(stream);
-    });
-    res.json({ url: resultado.secure_url });
+    res.json({ url: req.file.path });
   } catch (e) {
-    console.error("Error upload Cloudinary:", e);
-    res.status(500).json({ mensaje: "Error al subir imagen", error: e.message });
+    console.error(e);
+    res.status(500).json({ mensaje: "Error al subir imagen" });
   }
 });
 
@@ -120,68 +116,49 @@ app.post("/siguientes", async (req, res) => {
   }
 });
 
-// Agregar pictograma con imagen desde Cloudinary
-app.post("/agregar", async (req, res) => {
-  const { anteriorId, nuevaPalabra, imagenUrl, nodoPadre, esGlobal } = req.body;
+// Buscar palabras por IDs
+app.post("/palabras", async (req, res) => {
+  const { ids = [] } = req.body;
+  if (!Array.isArray(ids)) return res.status(400).json({ mensaje: 'ids debe ser un arreglo' });
+  const numericIds = ids.map(id => Number(id)).filter(id => !Number.isNaN(id));
+  if (!numericIds.length) return res.json({});
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
-    const maxResult = await session.run(
-      `MATCH (n:Palabra) RETURN coalesce(max(n.id), 0) + 1 AS nuevoId`
+    const result = await session.run(
+      `MATCH (p:Palabra)
+       WHERE p.id IN $ids
+       RETURN p`,
+      { ids: numericIds }
     );
-    const nuevoId = maxResult.records[0].get("nuevoId");
-
-    // Si esGlobal es true, crear como nodo original visible para todos
-    const nodoPersonalizadoFinal = esGlobal ? false : true;
-    const nodoPadreFinal = esGlobal ? true : (anteriorId === null);
-
-    if (anteriorId !== null && anteriorId !== undefined) {
-      const result = await session.run(
-        `MATCH (anterior:Palabra {id: $anteriorId})
-         CREATE (nuevo:Palabra {
-           id: $nuevoId,
-           palabra: $palabra,
-           imagenUrl: $imagenUrl,
-           nodoPersonalizado: $nodoPersonalizado,
-           nodoPadre: false
-         })
-         CREATE (anterior)-[:CONECTA_CON {peso: 1}]->(nuevo)
-         RETURN nuevo`,
-        { anteriorId, nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null, nodoPersonalizado: nodoPersonalizadoFinal }
-      );
-      const nuevo = result.records[0].get("nuevo").properties;
-      res.json({ mensaje: "Nodo creado y conectado", nodo: nuevo });
-    } else {
-      const result = await session.run(
-        `CREATE (nuevo:Palabra {
-           id: $nuevoId,
-           palabra: $palabra,
-           imagenUrl: $imagenUrl,
-           nodoPersonalizado: $nodoPersonalizado,
-           nodoPadre: $nodoPadre
-         })
-         RETURN nuevo`,
-        { nuevoId, palabra: nuevaPalabra, imagenUrl: imagenUrl || null, nodoPersonalizado: nodoPersonalizadoFinal, nodoPadre: nodoPadreFinal }
-      );
-      const nuevo = result.records[0].get("nuevo").properties;
-      res.json({ mensaje: "Nodo creado", nodo: nuevo });
-    }
+    const map = {};
+    result.records.forEach(r => {
+      const p = r.get("p").properties;
+      if (p.id !== undefined && p.palabra !== undefined) {
+        map[p.id] = p.palabra;
+      }
+    });
+    res.json(map);
   } catch (e) {
-    console.error("Error en /agregar:", e);
-    res.status(500).json({ error: e.message });
+    console.error(e);
+    res.status(500).send("Error");
   } finally {
     await session.close();
   }
 });
 
-// Mapear IDs a palabras (usado por el panel del terapeuta)
-app.post("/palabrasPorIds", async (req, res) => {
-  const { ids } = req.body;
-  if (!ids || !ids.length) return res.json({});
+// Buscar palabras por IDs (endpoint usado por pictocomm.html)
+app.post('/palabrasPorIds', async (req, res) => {
+  const { ids = [] } = req.body;
+  if (!Array.isArray(ids)) return res.status(400).json({ mensaje: 'ids debe ser un arreglo' });
+  const numericIds = ids.map(id => Number(id)).filter(id => !Number.isNaN(id));
+  if (!numericIds.length) return res.json({});
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
     const result = await session.run(
-      `MATCH (p:Palabra) WHERE p.id IN $ids RETURN p.id AS id, p.palabra AS palabra`,
-      { ids: ids.map(Number) }
+      `MATCH (p:Palabra)
+       WHERE p.id IN $ids
+       RETURN p.id AS id, p.palabra AS palabra`,
+      { ids: numericIds }
     );
     const mapa = {};
     result.records.forEach(r => {
@@ -189,72 +166,63 @@ app.post("/palabrasPorIds", async (req, res) => {
     });
     res.json(mapa);
   } catch (e) {
-    console.error('Error en /palabrasPorIds:', e);
+    console.error(e);
     res.status(500).json({ error: e.message });
   } finally {
     await session.close();
   }
 });
 
-app.post("/reforzar", async (req, res) => {
-  const { secuencia } = req.body;
-  if (!secuencia || !Array.isArray(secuencia) || secuencia.length < 2) {
-    return res.json({ mensaje: "Secuencia muy corta para reforzar" });
-  }
-
-  const session = driver.session({ database: process.env.NEO4J_DATABASE });
+// Debug: listar rutas registradas (temporal)
+app.get('/_debug_routes', (req, res) => {
   try {
-    for (let i = 0; i < secuencia.length - 1; i++) {
-      const idActual = secuencia[i];
-      const idSiguiente = secuencia[i + 1];
-      await session.run(
-        `MATCH (a:Palabra {id: $idActual}), (b:Palabra {id: $idSiguiente})
-         MERGE (a)-[r:CONECTA_CON]->(b)
-         ON CREATE SET r.peso = 1
-         ON MATCH SET r.peso = coalesce(r.peso, 0) + 1`,
-        { idActual, idSiguiente }
-      );
-    }
-    res.json({ mensaje: "Relaciones reforzadas", pares: secuencia.length - 1 });
+    const routes = [];
+    app._router.stack.forEach((middleware) => {
+      if (middleware.route) {
+        const methods = Object.keys(middleware.route.methods).join(',');
+        routes.push({ path: middleware.route.path, methods });
+      } else if (middleware.name === 'router' && middleware.handle && middleware.handle.stack) {
+        middleware.handle.stack.forEach((handler) => {
+          if (handler.route) {
+            const methods = Object.keys(handler.route.methods).join(',');
+            routes.push({ path: handler.route.path, methods });
+          }
+        });
+      }
+    });
+    res.json(routes);
   } catch (e) {
-    console.error("Error reforzando relaciones:", e);
     res.status(500).json({ error: e.message });
-  } finally {
-    await session.close();
   }
 });
 
-app.post("/eliminar", async (req, res) => {
-  const id = Number(req.body.id);
+// Agregar pictograma con imagen desde Cloudinary
+app.post("/agregar", async (req, res) => {
+  const { anteriorId, nuevaPalabra, imagenUrl } = req.body;
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
-    const check = await session.run(
-      `MATCH (p:Palabra {id: $id}) RETURN p.nodoPersonalizado AS esPersonalizado`,
-      { id }
+    const result = await session.run(
+      `MATCH (n:Palabra)
+       WITH coalesce(max(n.id), 0) + 1 AS nuevoId
+       CREATE (nuevo:Palabra {
+         id: nuevoId,
+         palabra: $palabra,
+         imagenUrl: $imagenUrl,
+         nodoPersonalizado: true,
+         nodoPadre: true
+       })
+       RETURN nuevo`,
+      { palabra: nuevaPalabra, imagenUrl: imagenUrl || null }
     );
-
-    if (!check.records.length) {
-      return res.status(404).json({ error: "Pictograma no encontrado" });
-    }
-
-    const esPersonalizado = check.records[0].get('esPersonalizado');
-
-    if (esPersonalizado === true) {
-      await session.run(
-        `MATCH (p:Palabra {id: $id}) DETACH DELETE p`,
-        { id }
-      );
-      return res.json({ mensaje: "Nodo personalizado eliminado", borradoDeNeo: true });
-    }
-
-    return res.json({ mensaje: "Pictograma original, agregar a eliminados del usuario", borradoDeNeo: false });
+    const nuevo = result.records[0].get("nuevo").properties;
+    res.json({ mensaje: "Nodo creado", nodo: nuevo });
   } catch (e) {
-    console.error("Error eliminando:", e);
-    res.status(500).json({ error: e.message });
+    console.error(e);
+    res.status(500).send("Error");
   } finally {
     await session.close();
   }
 });
 
-const PORT = process.env.PORT || 4001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Servidor Neo4j en http://localhost:${PORT}`));
